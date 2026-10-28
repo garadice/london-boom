@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>LONDON BOOM! 💥</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>💥</text></svg>">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #070b28; }
+  body {
+    font-family: "Trebuchet MS", "Comic Sans MS", ui-rounded, "SF Pro Rounded", "Segoe UI", system-ui, sans-serif;
+    user-select: none; -webkit-user-select: none; touch-action: none;
+  }
+  #game { position: fixed; inset: 0; display: block; touch-action: none; cursor: none; }
+
+  /* ---------- HUD ---------- */
+  #hud { position: fixed; inset: 0; pointer-events: none; z-index: 5; }
+  #weapons {
+    position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
+    display: flex; gap: 10px;
+  }
+  .wbtn {
+    pointer-events: auto; cursor: pointer;
+    min-width: 84px; min-height: 72px; padding: 8px 14px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+    background: linear-gradient(180deg, rgba(38,46,92,0.92), rgba(18,23,54,0.92));
+    border: 2px solid rgba(130,140,210,0.45); border-radius: 18px;
+    color: #cfd6ff; font-family: inherit;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.45);
+    transition: transform .12s ease, border-color .12s ease, box-shadow .12s ease;
+  }
+  .wbtn .emo { font-size: 30px; line-height: 1.1; filter: drop-shadow(0 2px 3px rgba(0,0,0,.5)); }
+  .wbtn .lbl { font-size: 11px; font-weight: 700; letter-spacing: 1px; }
+  .wbtn:hover { transform: translateY(-2px); }
+  .wbtn.active {
+    border-color: #ffca6b;
+    background: linear-gradient(180deg, rgba(84,66,32,0.95), rgba(46,33,24,0.95));
+    color: #ffe6b0;
+    transform: translateY(-3px) scale(1.07);
+    box-shadow: 0 6px 22px rgba(255,170,60,0.35), 0 3px 10px rgba(0,0,0,0.5);
+  }
+  #muteBtn {
+    pointer-events: auto; cursor: pointer;
+    position: absolute; top: 12px; right: 14px;
+    width: 56px; height: 56px; font-size: 26px;
+    background: linear-gradient(180deg, rgba(38,46,92,0.92), rgba(18,23,54,0.92));
+    border: 2px solid rgba(130,140,210,0.45); border-radius: 16px;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.45);
+    display: flex; align-items: center; justify-content: center;
+  }
+  #hint {
+    position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%);
+    color: rgba(230,235,255,0.75); font-size: 14px; font-weight: 700; letter-spacing: .5px;
+    background: rgba(10,14,40,0.45); padding: 6px 16px; border-radius: 999px;
+    transition: opacity 1.2s ease; white-space: nowrap;
+  }
+  #hint.fade { opacity: 0; }
+
+  /* ---------- Overlays ---------- */
+  .overlay {
+    position: fixed; inset: 0; z-index: 10;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(7,9,28,0.45); backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px);
+  }
+  .overlay.hidden { display: none; }
+  .panel {
+    text-align: center; padding: 44px 58px 40px; max-width: min(92vw, 640px);
+    background: linear-gradient(180deg, #232c5e 0%, #121637 100%);
+    border: 3px solid rgba(255,190,90,0.55); border-radius: 30px;
+    box-shadow: 0 24px 80px rgba(0,0,0,0.65), inset 0 1px 0 rgba(255,255,255,0.12);
+  }
+  .panel h1 {
+    font-weight: 900; line-height: 1.02; margin-bottom: 10px;
+    background: linear-gradient(180deg, #fff3c4 15%, #ffc95e 55%, #ff7a3d 100%);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+    filter: drop-shadow(0 4px 0 rgba(120,40,10,0.55)) drop-shadow(0 8px 18px rgba(0,0,0,0.5));
+  }
+  .panel h1 .t1 { font-size: clamp(28px, 5.5vw, 54px); letter-spacing: 10px; }
+  .panel h1 .t2 { font-size: clamp(52px, 11vw, 108px); letter-spacing: 2px; }
+  .panel p {
+    color: #c9d2f5; font-size: clamp(15px, 2.6vw, 20px); font-weight: 700; line-height: 1.55;
+    margin-bottom: 28px; text-shadow: 0 2px 4px rgba(0,0,0,0.5);
+  }
+  .bigbtn {
+    cursor: pointer; font-family: inherit;
+    font-size: clamp(26px, 5vw, 38px); font-weight: 900; letter-spacing: 2px;
+    color: #fff; text-shadow: 0 2px 0 rgba(140,50,10,0.6);
+    padding: 18px 64px; border: none; border-radius: 999px;
+    background: linear-gradient(180deg, #ffc95e 0%, #ff8a3d 55%, #f4582a 100%);
+    box-shadow: 0 8px 0 #a33415, 0 14px 34px rgba(255,110,40,0.45);
+    transition: transform .1s ease, box-shadow .1s ease;
+  }
+  .bigbtn:hover { transform: translateY(-2px) scale(1.03); }
+  .bigbtn:active { transform: translateY(4px); box-shadow: 0 3px 0 #a33415, 0 6px 16px rgba(255,110,40,0.35); }
+  @media (max-width: 700px) {
+    .wbtn { min-width: 66px; min-height: 60px; padding: 6px 8px; }
+    .wbtn .emo { font-size: 24px; }
+    .wbtn .lbl { font-size: 9px; }
+    #hint { display: none; }
+  }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<div id="hud">
+  <div id="weapons">
+    <button class="wbtn active" data-w="meteor" type="button"><span class="emo">☄️</span><span class="lbl">METEOR</span></button>
+    <button class="wbtn" data-w="blackhole" type="button"><span class="emo">🕳️</span><span class="lbl">BLACK HOLE</span></button>
+    <button class="wbtn" data-w="tornado" type="button"><span class="emo">🌪️</span><span class="lbl">TORNADO</span></button>
+  </div>
+  <button id="muteBtn" type="button" title="Sound on/off (M)">🔊</button>
+  <div id="hint">Click to fire! · 1 / 2 / 3 or scroll = switch weapon · M = mute</div>
+</div>
+
+<div id="title" class="overlay">
+  <div class="panel">
+    <h1><span class="t1">LONDON</span><br><span class="t2">BOOM! 💥</span></h1>
+    <p>Big Ben and the London Eye are standing tall.<br>☄️ meteors · 🕳️ black holes · 🌪️ tornadoes<br>Click everywhere. Break everything! 🇬🇧</p>
+    <button id="playBtn" class="bigbtn" type="button">▶&nbsp;PLAY</button>
+  </div>
+</div>
+
+<div id="win" class="overlay hidden">
+  <div class="panel">
+    <h1>🎉 YOU DID IT! 🎉</h1>
+    <p>London is officially BOOMED.<br>Fireworks for the champion destroyer! 🏆</p>
+    <button id="againBtn" class="bigbtn" type="button">🔁&nbsp;PLAY&nbsp;AGAIN</button>
+  </div>
+</div>
+
+<script src="vendor/matter.min.js"></script>
+<script src="game.js"></script>
+</body>
+</html>
