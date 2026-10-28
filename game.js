@@ -211,6 +211,31 @@ LB.audio = {
     } catch (e) {}
     ent.audio = null;
   },
+  fuseStart(ent) {
+    if (!this.ok() || ent.audio) return;
+    try {
+      const c = this.ctx;
+      const src = c.createBufferSource(); src.buffer = this.noiseBuf; src.loop = true;
+      const fl = c.createBiquadFilter(); fl.type = 'highpass'; fl.frequency.value = 3600; fl.Q.value = 0.7;
+      const g = c.createGain();
+      g.gain.setValueAtTime(0.0001, c.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.09, c.currentTime + 0.08);
+      src.connect(fl); fl.connect(g); g.connect(this.master);
+      src.start();
+      ent.audio = { src, g };
+    } catch (e) { ent.audio = null; }
+  },
+  fuseStop(ent) {
+    if (!ent.audio || !this.ctx) return;
+    try {
+      const a = ent.audio, c = this.ctx;
+      a.g.gain.cancelScheduledValues(c.currentTime);
+      a.g.gain.setValueAtTime(a.g.gain.value, c.currentTime);
+      a.g.gain.exponentialRampToValueAtTime(0.001, c.currentTime + 0.06);
+      a.src.stop(c.currentTime + 0.08);
+    } catch (e) {}
+    ent.audio = null;
+  },
   fanfare() {
     const notes = [523, 659, 784, 1047];
     for (let i = 0; i < notes.length; i++) this.tone('triangle', notes[i], notes[i], 0.22, 0.2, i * 0.14);
@@ -393,6 +418,7 @@ LB.constraints = [];            // landmark constraints (for cleanup + stress)
 LB.meteors = [];
 LB.holes = [];
 LB.tornados = [];
+LB.tnts = [];                    // lit TNT blocks (each on its own fuse)
 LB.rockets = [];
 LB.decals = [];                 // scorch marks
 LB.time = 0;
@@ -400,8 +426,8 @@ LB.shake = 0;
 LB.flash = 0;
 LB.phase = 'title';             // title | play | finale
 LB.weapon = 'meteor';
-LB.weaponFired = { meteor: 0, blackhole: 0, tornado: 0 };
-LB.events = { explosions: 0, consumed: 0, fireworks: 0, brokenConstraints: 0, shakes: 0, splashes: 0, destroyedAll: 0, resets: 0 };
+LB.weaponFired = { meteor: 0, blackhole: 0, tornado: 0, tnt: 0 };
+LB.events = { explosions: 0, consumed: 0, fireworks: 0, brokenConstraints: 0, shakes: 0, splashes: 0, destroyedAll: 0, resets: 0, tntPlaced: 0, tntExploded: 0 };
 LB.tower = { bodies: [], clockBodies: [], total: 0 };
 LB.eye = { rim: [], rimIn: [], pods: [], hub: null, drive: true, spin: 0, led: 1 };
 
@@ -695,6 +721,14 @@ function fire(weapon, wx, wy) {
     LB.audio.rumbleStart(t);
     return true;
   }
+  if (weapon === 'tnt') {
+    if (LB.tnts.length >= 8) return false;
+    if (!isFinite(wx) || !isFinite(wy)) return false;
+    spawnTNT(clamp(wx, 40, W - 40), clamp(wy, 40, H - 40));
+    LB.weaponFired.tnt++;
+    LB.events.tntPlaced++;
+    return true;
+  }
   return false;
 }
 
@@ -763,9 +797,142 @@ function explodeMeteor(b) {
   }
 }
 
+/* ---------------- TNT (Minecraft-style: real body, 3 s flashing fuse) ---------------- */
+const TNT_SIZE = 34;
+const TNT_FUSE = 3.0;
+let tntSeq = 0;
+
+function tntBlinkOn(elapsed) {
+  // Minecraft flash: white blink whose period shortens toward detonation.
+  // Pure function of elapsed time (deterministic, testable). ON fraction is 35%
+  // so the iconic red block dominates still frames mid-fuse.
+  const f = clamp(elapsed / TNT_FUSE, 0, 1);
+  const period = Math.max(0.55 - 0.47 * f, 0.08);
+  return (elapsed % period) < period * 0.35;
+}
+
+function spawnTNT(x, y) {
+  const b = M.Bodies.rectangle(x, y, TNT_SIZE, TNT_SIZE, {
+    friction: 0.6, frictionStatic: 0.9, restitution: 0.05,
+    density: 0.004, frictionAir: 0.01, sleepThreshold: 60,
+    label: 'tnt'
+  });
+  tag(b, 'tnt', 'tnt');
+  b.plugin.lb.color = '#d5442c';
+  // deterministic mottle pattern (stable across frames — no per-frame flicker)
+  const rng = mulberry32(90001 + ((++tntSeq) * 7919) % 65536);
+  const h = TNT_SIZE / 2, speck = [];
+  for (let k = 0; k < 7; k++) {
+    speck.push([-h + 3 + rng() * (TNT_SIZE - 6), -h + 2 + rng() * 7, rng() < 0.5]);
+    speck.push([-h + 3 + rng() * (TNT_SIZE - 6), h - 2 - rng() * 7, rng() < 0.5]);
+  }
+  b.plugin.lb.speck = speck;
+  M.Composite.add(world, b);
+  const t = { id: tntSeq, body: b, t: 0, dur: TNT_FUSE, on: true, audio: null };
+  LB.tnts.push(t);
+  LB.audio.fuseStart(t);
+  // instant placement feedback
+  P.dustPuff(x, y, 0, -0.4, 26, 0.35);
+  P.sparks(x, y - TNT_SIZE / 2, 6, SPR.glow.gold, 4);
+  return t;
+}
+
+function explodeTNT(t) {
+  LB.audio.fuseStop(t);
+  t.on = false;
+  const b = t.body;
+  if (!b.plugin.lb || b.plugin.lb.removed) return;
+  const x = b.position.x, y = b.position.y;
+  removeBody(b, { silent: true });
+
+  LB.flash = Math.min(LB.flash + 0.9, 1);
+  LB.shake = Math.min(LB.shake + 30, 55);
+  LB.events.explosions++;
+  LB.events.shakes++;
+  LB.events.tntExploded++;
+  LB.audio.boom(1.15);
+  P.ring(x, y, 15, 6);
+  P.ring(x, y, 9, 3, 'rgba(255,190,110,0.8)');
+  P.embers(x, y, 52);
+  P.sparks(x, y, 40, SPR.glow.gold, 10);
+  P.smoke(x, y, 20, true);
+  for (let k = 0; k < 8; k++) {
+    P.flame(x + rand(-26, 26), y + rand(-26, 26), rand(-2, 2), rand(-3.4, -0.6));
+  }
+
+  // vaporize core + radial impulse (other TNT blocks are flung, never vaporized:
+  // every fuse runs its own full 3 s schedule — no chain detonation)
+  for (let k = 0; k < LB.bodies.length; k++) {
+    const o = LB.bodies[k];
+    if (o.isStatic || !o.plugin.lb) continue;
+    const olb = o.plugin.lb;
+    if (olb.removed) continue;
+    const d = dist(o.position.x, o.position.y, x, y);
+    if (d < 74 && olb.set !== 'meteor' && olb.set !== 'tnt') {
+      removeBody(o, {});
+    } else if (d < 360) {
+      const f = 1 - d / 360;
+      const ux = (o.position.x - x) / (d || 1), uy = (o.position.y - y) / (d || 1);
+      M.Sleeping.set(o, false);
+      M.Body.setVelocity(o, {
+        x: o.velocity.x + ux * f * 30,
+        y: o.velocity.y + uy * f * 30 - f * 10
+      });
+      M.Body.setAngularVelocity(o, o.angularVelocity + (Math.random() - 0.5) * 0.3 * f);
+    }
+  }
+  // the blast severs nearby Eye cables, like the other weapons do
+  for (let ci = LB.constraints.length - 1; ci >= 0; ci--) {
+    const c = LB.constraints[ci];
+    const ax = c.bodyA ? c.bodyA.position.x + c.pointA.x : c.pointA.x;
+    const ay = c.bodyA ? c.bodyA.position.y + c.pointA.y : c.pointA.y;
+    const bx = c.bodyB ? c.bodyB.position.x + c.pointB.x : c.pointB.x;
+    const by = c.bodyB ? c.bodyB.position.y + c.pointB.y : c.pointB.y;
+    if (dist((ax + bx) / 2, (ay + by) / 2, x, y) < 78) {
+      M.Composite.remove(world, c);
+      LB.constraints.splice(ci, 1);
+      LB.events.brokenConstraints++;
+      P.sparkle((ax + bx) / 2, (ay + by) / 2, 5);
+    }
+  }
+  // scorch decal
+  if (y > GROUND_Y - 110) {
+    LB.decals.push({ x: x, y: Math.min(y, GROUND_Y + 8), size: rand(80, 120), alpha: 0.55 });
+    if (LB.decals.length > 14) LB.decals.shift();
+  }
+}
+
 /* ---------------- per-step weapon forces ---------------- */
 function stepWeapons(dt) {
   const dts = dt / 1000;
+
+  // TNT fuses: per-block timers, independent of physics (blocks may sleep)
+  for (let i = LB.tnts.length - 1; i >= 0; i--) {
+    const t = LB.tnts[i];
+    const b = t.body;
+    if (!b.plugin.lb || b.plugin.lb.removed ||
+        !isFinite(b.position.x) || !isFinite(b.position.y)) {
+      // flung out of bounds / swallowed by a black hole / NaN — fuse dies with it
+      LB.audio.fuseStop(t);
+      LB.tnts.splice(i, 1);
+      continue;
+    }
+    t.t += dts;
+    // fuse sparks from the block's (rotated) top centre
+    if (stepCounter % 2 === 0) {
+      const px = b.position.x + (TNT_SIZE / 2) * Math.sin(b.angle);
+      const py = b.position.y - (TNT_SIZE / 2) * Math.cos(b.angle);
+      P.spawn('spark', px + rand(-3, 3), py, {
+        vx: rand(-0.8, 0.8), vy: rand(-2.2, -0.6), life: rand(0.2, 0.5),
+        size: rand(2, 4.5), drag: 0.94, grav: 0.06,
+        spr: Math.random() < 0.7 ? SPR.glow.gold : SPR.glow.white
+      });
+    }
+    if (t.t >= t.dur) {
+      LB.tnts.splice(i, 1);
+      explodeTNT(t);
+    }
+  }
 
   // meteors: trail + fuse
   for (let i = LB.meteors.length - 1; i >= 0; i--) {
@@ -1137,9 +1304,11 @@ function destroyAll() {
 
 function resetWorld() {
   for (let i = LB.tornados.length - 1; i >= 0; i--) LB.audio.rumbleStop(LB.tornados[i]);
+  for (let i = LB.tnts.length - 1; i >= 0; i--) LB.audio.fuseStop(LB.tnts[i]);
   M.Composite.clear(world, false, true);
   LB.constraints = [];
   LB.meteors = []; LB.holes = []; LB.tornados = []; LB.rockets = [];
+  LB.tnts = [];
   LB.decals = [];
   LB.tower.bodies = []; LB.tower.clockBodies = []; LB.tower.total = 0;
   LB.eye.rim = []; LB.eye.rimIn = []; LB.eye.pods = []; LB.eye.hub = null;
@@ -1147,8 +1316,10 @@ function resetWorld() {
   LB.finale = null;
   LB.shake = 0; LB.flash = 0;
   LB.weaponFired.meteor = 0; LB.weaponFired.blackhole = 0; LB.weaponFired.tornado = 0;
+  LB.weaponFired.tnt = 0;
   LB.events.explosions = 0; LB.events.consumed = 0; LB.events.fireworks = 0;
   LB.events.brokenConstraints = 0; LB.events.shakes = 0; LB.events.splashes = 0;
+  LB.events.tntPlaced = 0; LB.events.tntExploded = 0;
   P.clear();
   const winEl = document.getElementById('win');
   if (winEl) winEl.classList.add('hidden');
@@ -1217,7 +1388,7 @@ function hideHintSoon() {
   }
 }
 
-const WEAPONS = ['meteor', 'blackhole', 'tornado'];
+const WEAPONS = ['meteor', 'blackhole', 'tornado', 'tnt'];
 function selectWeapon(w) {
   LB.weapon = w;
   const btns = document.querySelectorAll('.wbtn');
@@ -1236,6 +1407,7 @@ window.addEventListener('keydown', function (e) {
   if (e.key === '1') selectWeapon('meteor');
   else if (e.key === '2') selectWeapon('blackhole');
   else if (e.key === '3') selectWeapon('tornado');
+  else if (e.key === '4') selectWeapon('tnt');
   else if (e.key === 'm' || e.key === 'M') toggleMute();
 });
 window.addEventListener('wheel', function (e) {
@@ -1447,6 +1619,10 @@ function gatherLightSources() {
   if (LB.eye.hub && !LB.eye.hub.plugin.lb.removed) srcs.push({ x: LB.eye.hub.position.x, col: 'rgba(140,120,255,', a: 0.35 * LB.eye.led, w: 130 });
   // meteors
   for (let i = 0; i < LB.meteors.length; i++) srcs.push({ x: LB.meteors[i].position.x, col: 'rgba(255,150,60,', a: 0.55, w: 44 });
+  // lit TNT blocks (brighter while flashing)
+  for (let i = 0; i < LB.tnts.length; i++) {
+    srcs.push({ x: LB.tnts[i].body.position.x, col: 'rgba(255,90,60,', a: tntBlinkOn(LB.tnts[i].t) ? 0.6 : 0.35, w: 40 });
+  }
   // holes
   for (let i = 0; i < LB.holes.length; i++) srcs.push({ x: LB.holes[i].x, col: 'rgba(170,120,255,', a: 0.5, w: 62 });
   // fireworks rockets
@@ -1521,6 +1697,7 @@ function drawBodies() {
     if (!lb) continue;
     if (lb.removed) continue;
     if (lb.set === 'meteor') continue; // drawn separately
+    if (lb.set === 'tnt') continue;    // drawn separately (Minecraft block)
     if (lb.set === 'ground') continue;
     const v = b.vertices;
     if (lb.kind === 'pod') {
@@ -1621,6 +1798,60 @@ function drawClockFace(t) {
   ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + Math.cos(hA) * 7.5, cy + Math.sin(hA) * 7.5); ctx.stroke();
   ctx.fillStyle = '#2c2109';
   ctx.beginPath(); ctx.arc(cx, cy, 1.8, 0, Math.PI * 2); ctx.fill();
+}
+
+function drawTNTs() {
+  const h = TNT_SIZE / 2, band = TNT_SIZE * 0.21;
+  for (let i = 0; i < LB.tnts.length; i++) {
+    const t = LB.tnts[i], b = t.body;
+    const blink = tntBlinkOn(t.t);
+    // warm halo so the block reads against the night scene (brighter on flash)
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.globalAlpha = blink ? 0.75 : 0.4;
+    ctx.drawImage(SPR.glow.red, b.position.x - TNT_SIZE * 1.05, b.position.y - TNT_SIZE * 1.05, TNT_SIZE * 2.1, TNT_SIZE * 2.1);
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 1;
+
+    ctx.save();
+    ctx.translate(b.position.x, b.position.y);
+    ctx.rotate(b.angle);
+    // body — mottled red
+    ctx.fillStyle = '#c93a22';
+    ctx.fillRect(-h, -h, TNT_SIZE, TNT_SIZE);
+    const speck = b.plugin.lb.speck || [];
+    for (let k = 0; k < speck.length; k++) {
+      ctx.fillStyle = speck[k][2] ? '#e05a35' : '#a02c15';
+      ctx.fillRect(speck[k][0] - 1.5, speck[k][1] - 1.5, 3, 3);
+    }
+    // darker frame edges
+    ctx.fillStyle = 'rgba(70,15,5,0.55)';
+    ctx.fillRect(-h, -h, TNT_SIZE, 2.5);
+    ctx.fillRect(-h, h - 2.5, TNT_SIZE, 2.5);
+    ctx.fillStyle = 'rgba(60,12,4,0.35)';
+    ctx.fillRect(-h, -h, 2, TNT_SIZE);
+    ctx.fillRect(h - 2, -h, 2, TNT_SIZE);
+    // white lettering band
+    ctx.fillStyle = '#ece7dd';
+    ctx.fillRect(-h + 1.5, -band, TNT_SIZE - 3, band * 2);
+    ctx.fillStyle = 'rgba(40,8,2,0.5)';
+    ctx.fillRect(-h + 1.5, -band - 1, TNT_SIZE - 3, 1);
+    ctx.fillRect(-h + 1.5, band, TNT_SIZE - 3, 1);
+    ctx.fillStyle = '#22160f';
+    ctx.font = '900 ' + (TNT_SIZE * 0.30).toFixed(1) + 'px "Trebuchet MS", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('TNT', 0, 0.5);
+    // fuse nub on top
+    ctx.fillStyle = '#3a2a1a';
+    ctx.fillRect(-1.5, -h - 3, 3, 3.5);
+    // Minecraft blink: whole texture flashes white, accelerating toward the boom
+    if (blink) {
+      ctx.fillStyle = 'rgba(255,255,255,0.88)';
+      ctx.fillRect(-h, -h, TNT_SIZE, TNT_SIZE);
+    }
+    ctx.restore();
+  }
+  ctx.globalAlpha = 1;
 }
 
 function drawMeteors() {
@@ -1764,7 +1995,7 @@ function drawTornados(t) {
 function drawReticle(t) {
   if (!LB.pointer.active || LB.pointer.type !== 'mouse' || LB.phase === 'title') return;
   const w = screenToWorld(LB.pointer.x, LB.pointer.y);
-  const col = LB.weapon === 'meteor' ? 'rgba(255,170,80,0.95)' : LB.weapon === 'blackhole' ? 'rgba(180,130,255,0.95)' : 'rgba(120,220,255,0.95)';
+  const col = LB.weapon === 'meteor' ? 'rgba(255,170,80,0.95)' : LB.weapon === 'blackhole' ? 'rgba(180,130,255,0.95)' : LB.weapon === 'tnt' ? 'rgba(255,110,80,0.95)' : 'rgba(120,220,255,0.95)';
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   const sx = LB.pointer.x, sy = LB.pointer.y;
   const r = 17 + Math.sin(t * 5) * 2.5;
@@ -1778,7 +2009,7 @@ function drawReticle(t) {
   ctx.stroke();
   ctx.font = '20px serif';
   ctx.textAlign = 'left';
-  ctx.fillText(LB.weapon === 'meteor' ? '☄️' : LB.weapon === 'blackhole' ? '🕳️' : '🌪️', sx + 20, sy - 16);
+  ctx.fillText(LB.weapon === 'meteor' ? '☄️' : LB.weapon === 'blackhole' ? '🕳️' : LB.weapon === 'tnt' ? '🧨' : '🌪️', sx + 20, sy - 16);
 }
 
 /* ============================================================
@@ -1831,6 +2062,7 @@ function render(t) {
   drawReflections(t);
   drawDecals();
   drawBodies();
+  drawTNTs();
   drawMeteors();
   drawTornados(t);
   P.render(ctx, 'under');
@@ -1883,6 +2115,18 @@ window.__TEST__ = {
   landmarkIntegrity: function () {
     return { tower: integrityOf('tower'), eye: integrityOf('eye') };
   },
+  tnt: function () {
+    // per-block fuse state: id, position, fuse seconds remaining, blink phase
+    return LB.tnts.map(function (t) {
+      return {
+        id: t.id,
+        x: Math.round(t.body.position.x * 10) / 10,
+        y: Math.round(t.body.position.y * 10) / 10,
+        fuse: Math.round((t.dur - t.t) * 1000) / 1000,
+        blink: tntBlinkOn(t.t)
+      };
+    });
+  },
   weaponFired: LB.weaponFired,
   events: LB.events,
   state: function () {
@@ -1892,6 +2136,7 @@ window.__TEST__ = {
       phase: LB.phase, fps: med > 0 ? Math.round(1000 / med) : 0,
       particles: P.active, shake: Math.round(LB.shake),
       meteors: LB.meteors.length, holes: LB.holes.length, tornados: LB.tornados.length,
+      tnts: LB.tnts.length,
       time: Math.round(LB.time * 10) / 10, eyeSpinDeg: Math.round(LB.eye.spin * 10) / 10
     };
   },

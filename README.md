@@ -2,7 +2,7 @@
 
 A browser physics-destruction game for kids (built for a 6-year-old London-wrecker).
 Big Ben (Elizabeth Tower) and the London Eye stand by the Thames at dusk — smash
-them with meteors, black holes and tornadoes until the fireworks celebrate you.
+them with meteors, black holes, tornadoes and TNT until the fireworks celebrate you.
 
 - **Zero build step** — plain HTML + JS + vendored Matter.js. No bundler, no npm.
 - **Zero runtime network** — everything (physics, rendering, sound) is local and
@@ -27,7 +27,7 @@ python3 -m http.server 8080
 | Action | How |
 | --- | --- |
 | Fire selected weapon | click / tap anywhere on the scene |
-| Switch weapon | keys `1` `2` `3`, mouse wheel, or the three big emoji buttons |
+| Switch weapon | keys `1` `2` `3` `4`, mouse wheel, or the four big emoji buttons |
 | Mute | 🔊 button (top right) or key `M` |
 | Play again | big button after the fireworks finale |
 
@@ -41,6 +41,13 @@ python3 -m http.server 8080
 - 🌪️ **TORNADO** — a wandering vortex spins for ~5 s: tangential suction + upward
   lift that widens with height, shreds the wheel's light constraints, flings bodies
   in arcs; they rain down (and bob in the Thames).
+- 🧨 **TNT** — click to place a Minecraft-style TNT block right where you aimed:
+  a real physics body that falls, stacks, and can be knocked around by your other
+  weapons before it goes off. Each block runs its own 3.0-second fuse (white flash
+  accelerating toward detonation, hissing fuse) and then explodes — radial blast,
+  fire, embers, smoke, shockwave ring, white flash, screen shake, synthesized boom;
+  strong enough to hole the tower and cut the Eye's cables. Place several at once:
+  every fuse keeps its own schedule, so the booms stagger.
 
 Destroy both landmarks (integrity below 45%) → fireworks finale + 🎉 YOU DID IT!
 
@@ -69,8 +76,9 @@ clock blocks end up.
 ```js
 __TEST__.bodyCounts()        // { tower, eye, dynamic, static, total }
 __TEST__.landmarkIntegrity() // { tower, eye } 0..1 (1 = intact)
-__TEST__.weaponFired         // { meteor, blackhole, tornado } live counters
-__TEST__.events              // { explosions, consumed, fireworks, brokenConstraints, ... }
+__TEST__.weaponFired         // { meteor, blackhole, tornado, tnt } live counters
+__TEST__.events              // { explosions, consumed, fireworks, brokenConstraints, tntPlaced, tntExploded, ... }
+__TEST__.tnt()               // live TNT blocks: [{ id, x, y, fuse (s remaining), blink }]
 __TEST__.fire(weapon, x, y)  // programmatic fire in world coords (1600x900)
 __TEST__.screenToWorld(cx, cy)
 __TEST__.destroyAll()        // test shortcut: wreck both landmarks
