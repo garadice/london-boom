@@ -5,6 +5,12 @@ Elizabeth Tower (Big Ben), the London Eye and London traffic stand by the Thames
 dusk — smash them with meteors, black holes, tornadoes and TNT until the fireworks
 celebrate you. Then KEEP PLAYING in the ruins.
 
+**▶ Play it live:** https://london-boom.vercel.app
+
+![LONDON BOOM! — the world](docs/screenshot-title.png)
+
+![KEEP PLAYING — fireworks over the ruins](docs/screenshot-keepplaying.png)
+
 - **Zero build step** — plain HTML + JS + vendored Matter.js. No bundler, no npm.
 - **Zero runtime network** — everything (physics, rendering, sound, bells) is local
   and synthesized. Works from `file://` and as static hosting; installable as a PWA
@@ -160,3 +166,7 @@ changed — that cache-name change is what makes clients pick up the new build.
 
 - Physics: [Matter.js](https://brm.io/matter-js/) 0.20.0 by @liabru (MIT) — vendored in `vendor/`.
 - Everything else: hand-rolled Canvas2D + WebAudio, made with 💥 for a small destroyer of cities.
+
+## License
+
+MIT — see [LICENSE](LICENSE). © 2026 Martin Mogis.
