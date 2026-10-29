@@ -108,7 +108,7 @@ at 2), NaN/velocity/out-of-bounds guards every step, full window-resize support,
 all audio synthesized with WebAudio (no files), touch/pointer events throughout,
 service worker caches local files only (skipped silently on `file://`).
 
-The world runs at 0.6 g — the sweet spot where the 442-block tower and the
+The world runs at 0.6 g — the sweet spot where the 462-block tower and the
 157-part Eye stay put until you hurt them, but debris still falls naturally.
 All tower courses stack on one shared 12-column grid (centred subsets only) —
 verified stable over 90 s of simulated physics (`tools/tower_stability_test.js`).
