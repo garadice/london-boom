@@ -133,6 +133,8 @@ __TEST__.screenToWorld(cx, cy)
 __TEST__.destroyAll()        // test shortcut: wreck both landmarks
 __TEST__.reset()             // full world reset (same as PLAY AGAIN)
 __TEST__.state()             // { phase, fps, particles, vehiclesOnScreen, continueMode, ... }
+__TEST__.step(n)             // headless helper: pump n exact fixed physics steps
+__TEST__.renderFrame()       // headless helper: paint one frame on demand
 __TEST__.errors              // collected console/page errors (should stay [])
 ```
 

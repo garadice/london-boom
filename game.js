@@ -1773,19 +1773,7 @@ function stepFinale(dt) {
     }
   }
 
-  const F = LB.finale;
-  if (!F) return;
-  F.t += dts;
-  if (F.t > 2.4 && !F.shown) {
-    F.shown = true;
-    const winEl = document.getElementById('win');
-    if (winEl) winEl.classList.remove('hidden');
-  }
-  if (F.t > F.next && F.rockets < 34) {
-    F.next = F.t + rand(0.14, 0.34);
-    launchRocket();
-    F.rockets++;
-  }
+  // rocket flight + burst — runs in the finale AND in keep-playing mode
   for (let i = LB.rockets.length - 1; i >= 0; i--) {
     const rk = LB.rockets[i];
     rk.t += dts;
@@ -1807,6 +1795,20 @@ function stepFinale(dt) {
       LB.events.fireworks++;
       LB.rockets.splice(i, 1);
     }
+  }
+
+  const F = LB.finale;
+  if (!F) return;
+  F.t += dts;
+  if (F.t > 2.4 && !F.shown) {
+    F.shown = true;
+    const winEl = document.getElementById('win');
+    if (winEl) winEl.classList.remove('hidden');
+  }
+  if (F.t > F.next && F.rockets < 34) {
+    F.next = F.t + rand(0.14, 0.34);
+    launchRocket();
+    F.rockets++;
   }
 }
 
@@ -2275,141 +2277,172 @@ function topEdge(b) {
   return [v[i0], v[i1]];
 }
 
-/* per-section masonry details, drawn in the block's own (rotated) frame */
-function drawBlockDetail(b) {
-  const lb = b.plugin.lb, w = lb.w, h = lb.h;
-  ctx.save();
-  ctx.translate(b.position.x, b.position.y);
-  ctx.rotate(b.angle);
-  switch (lb.kind) {
+/* per-section masonry details, drawn in the block's own (rotated) frame.
+   Performance: each (kind,w,h) detail is pre-rendered ONCE into a tiny sprite;
+   upright blocks (angle ≈ 0 — the standing tower) blit it with a single
+   drawImage and no canvas transforms; only tumbling blocks take the
+   save/rotate path. Keeps 462 detailed blocks cheap. */
+const DETAIL_SPRITES = {};
+function drawKindDetail(g, kind, w, h, color) {
+  switch (kind) {
     case 'plinth':
-      ctx.strokeStyle = 'rgba(10,8,6,0.4)';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(-w / 2 + 1, -h / 6); ctx.lineTo(w / 2 - 1, -h / 6);
-      ctx.moveTo(-w / 2 + 1, h / 6); ctx.lineTo(w / 2 - 1, h / 6);
-      ctx.stroke();
+      g.strokeStyle = 'rgba(10,8,6,0.4)';
+      g.lineWidth = 1;
+      g.beginPath();
+      g.moveTo(-w / 2 + 1, -h / 6); g.lineTo(w / 2 - 1, -h / 6);
+      g.moveTo(-w / 2 + 1, h / 6); g.lineTo(w / 2 - 1, h / 6);
+      g.stroke();
       break;
     case 'plinthCap':
-      ctx.strokeStyle = 'rgba(10,8,6,0.35)';
-      ctx.lineWidth = 1;
-      ctx.beginPath(); ctx.moveTo(-w / 2 + 1, 0); ctx.lineTo(w / 2 - 1, 0); ctx.stroke();
+      g.strokeStyle = 'rgba(10,8,6,0.35)';
+      g.lineWidth = 1;
+      g.beginPath(); g.moveTo(-w / 2 + 1, 0); g.lineTo(w / 2 - 1, 0); g.stroke();
       break;
     case 'shaftWin': {
       // paired lancet windows (the real shaft's rhythm)
-      const ww = w * 0.26, wh = h * 0.62, gap = w * 0.14;
-      ctx.fillStyle = '#241d10';
+      const ww = w * 0.26, gap = w * 0.14;
+      g.fillStyle = '#241d10';
       for (let s = -1; s <= 1; s += 2) {
         const wx = s * (gap / 2 + ww / 2) - ww / 2;
-        ctx.beginPath();
-        ctx.moveTo(wx, h * 0.18);
-        ctx.lineTo(wx, -h * 0.18);
-        ctx.quadraticCurveTo(wx + ww / 2, -h * 0.42, wx + ww, -h * 0.18);
-        ctx.lineTo(wx + ww, h * 0.18);
-        ctx.closePath();
-        ctx.fill();
+        g.beginPath();
+        g.moveTo(wx, h * 0.18);
+        g.lineTo(wx, -h * 0.18);
+        g.quadraticCurveTo(wx + ww / 2, -h * 0.42, wx + ww, -h * 0.18);
+        g.lineTo(wx + ww, h * 0.18);
+        g.closePath();
+        g.fill();
       }
       // faint warm light inside one pane now and then
-      ctx.fillStyle = 'rgba(255,190,110,0.35)';
-      ctx.fillRect(-gap / 2 - ww * 0.75, -h * 0.1, ww * 0.5, h * 0.24);
+      g.fillStyle = 'rgba(255,190,110,0.35)';
+      g.fillRect(-gap / 2 - ww * 0.75, -h * 0.1, ww * 0.5, h * 0.24);
       break;
     }
     case 'string':
       // dentil course
-      ctx.fillStyle = 'rgba(12,9,5,0.45)';
-      for (let dx = -w / 2 + 1.5; dx < w / 2 - 1; dx += 3.4) ctx.fillRect(dx, h / 2 - 2.6, 1.6, 2);
+      g.fillStyle = 'rgba(12,9,5,0.45)';
+      for (let dx = -w / 2 + 1.5; dx < w / 2 - 1; dx += 3.4) g.fillRect(dx, h / 2 - 2.6, 1.6, 2);
       break;
     case 'clockBand': {
       // blind arcading: three little arches
-      ctx.strokeStyle = 'rgba(30,22,8,0.55)';
-      ctx.lineWidth = 1;
+      g.strokeStyle = 'rgba(30,22,8,0.55)';
+      g.lineWidth = 1;
       for (let s = -1; s <= 1; s++) {
         const ax = s * w * 0.28;
-        ctx.beginPath();
-        ctx.moveTo(ax - 2.2, h * 0.28);
-        ctx.lineTo(ax - 2.2, -h * 0.05);
-        ctx.quadraticCurveTo(ax, -h * 0.34, ax + 2.2, -h * 0.05);
-        ctx.lineTo(ax + 2.2, h * 0.28);
-        ctx.stroke();
+        g.beginPath();
+        g.moveTo(ax - 2.2, h * 0.28);
+        g.lineTo(ax - 2.2, -h * 0.05);
+        g.quadraticCurveTo(ax, -h * 0.34, ax + 2.2, -h * 0.05);
+        g.lineTo(ax + 2.2, h * 0.28);
+        g.stroke();
       }
       break;
     }
     case 'clockFrame':
       // stone relief around the dial
-      ctx.strokeStyle = 'rgba(35,26,9,0.5)';
-      ctx.lineWidth = 1.2;
-      ctx.strokeRect(-w / 2 + 1.2, -h / 2 + 1.2, w - 2.4, h - 2.4);
+      g.strokeStyle = 'rgba(35,26,9,0.5)';
+      g.lineWidth = 1.2;
+      g.strokeRect(-w / 2 + 1.2, -h / 2 + 1.2, w - 2.4, h - 2.4);
       break;
     case 'cornice':
       // protruding course: dark underside
-      ctx.fillStyle = 'rgba(8,6,3,0.5)';
-      ctx.fillRect(-w / 2, h / 2 - 2, w, 2);
+      g.fillStyle = 'rgba(8,6,3,0.5)';
+      g.fillRect(-w / 2, h / 2 - 2, w, 2);
       break;
     case 'louvre': {
       // slatted bell-chamber opening + pointed arch head
-      ctx.strokeStyle = 'rgba(70,78,104,0.6)';
-      ctx.lineWidth = 1.1;
+      g.strokeStyle = 'rgba(70,78,104,0.6)';
+      g.lineWidth = 1.1;
       for (let i2 = -1; i2 <= 1; i2++) {
-        ctx.beginPath();
-        ctx.moveTo(-w / 2 + 2, i2 * h * 0.26);
-        ctx.lineTo(w / 2 - 2, i2 * h * 0.26);
-        ctx.stroke();
+        g.beginPath();
+        g.moveTo(-w / 2 + 2, i2 * h * 0.26);
+        g.lineTo(w / 2 - 2, i2 * h * 0.26);
+        g.stroke();
       }
-      ctx.strokeStyle = 'rgba(130,140,175,0.35)';
-      ctx.beginPath();
-      ctx.moveTo(-w / 2 + 1.5, h / 2 - 1);
-      ctx.lineTo(-w / 2 + 1.5, -h * 0.1);
-      ctx.quadraticCurveTo(0, -h / 2 - 2, w / 2 - 1.5, -h * 0.1);
-      ctx.lineTo(w / 2 - 1.5, h / 2 - 1);
-      ctx.stroke();
+      g.strokeStyle = 'rgba(130,140,175,0.35)';
+      g.beginPath();
+      g.moveTo(-w / 2 + 1.5, h / 2 - 1);
+      g.lineTo(-w / 2 + 1.5, -h * 0.1);
+      g.quadraticCurveTo(0, -h / 2 - 2, w / 2 - 1.5, -h * 0.1);
+      g.lineTo(w / 2 - 1.5, h / 2 - 1);
+      g.stroke();
       break;
     }
     case 'lantern': {
       // the Ayrton Light — a glowing lantern window
-      ctx.fillStyle = '#ffd489';
-      ctx.fillRect(-w * 0.3, -h * 0.32, w * 0.6, h * 0.64);
-      ctx.strokeStyle = 'rgba(60,40,15,0.8)';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(0, -h * 0.32); ctx.lineTo(0, h * 0.32);
-      ctx.moveTo(-w * 0.3, 0); ctx.lineTo(w * 0.3, 0);
-      ctx.stroke();
+      g.fillStyle = '#ffd489';
+      g.fillRect(-w * 0.3, -h * 0.32, w * 0.6, h * 0.64);
+      g.strokeStyle = 'rgba(60,40,15,0.8)';
+      g.lineWidth = 1;
+      g.beginPath();
+      g.moveTo(0, -h * 0.32); g.lineTo(0, h * 0.32);
+      g.moveTo(-w * 0.3, 0); g.lineTo(w * 0.3, 0);
+      g.stroke();
       break;
     }
     case 'lanternRoof': {
       // little pyramidal cap
-      ctx.fillStyle = lb.color;
-      ctx.beginPath();
-      ctx.moveTo(-w / 2 - 1.5, h / 2);
-      ctx.lineTo(0, -h / 2 - 4);
-      ctx.lineTo(w / 2 + 1.5, h / 2);
-      ctx.closePath();
-      ctx.fill();
-      ctx.strokeStyle = 'rgba(200,215,255,0.25)';
-      ctx.lineWidth = 1;
-      ctx.stroke();
+      g.fillStyle = color;
+      g.beginPath();
+      g.moveTo(-w / 2 - 1.5, h / 2);
+      g.lineTo(0, -h / 2 - 4);
+      g.lineTo(w / 2 + 1.5, h / 2);
+      g.closePath();
+      g.fill();
+      g.strokeStyle = 'rgba(200,215,255,0.25)';
+      g.lineWidth = 1;
+      g.stroke();
       break;
     }
     case 'spire': {
       // openwork cast-iron tracery
-      ctx.strokeStyle = 'rgba(150,170,205,0.3)';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(-w / 2 + 1, -h / 2 + 1); ctx.lineTo(w / 2 - 1, h / 2 - 1);
-      ctx.moveTo(w / 2 - 1, -h / 2 + 1); ctx.lineTo(-w / 2 + 1, h / 2 - 1);
-      ctx.stroke();
+      g.strokeStyle = 'rgba(150,170,205,0.3)';
+      g.lineWidth = 1;
+      g.beginPath();
+      g.moveTo(-w / 2 + 1, -h / 2 + 1); g.lineTo(w / 2 - 1, h / 2 - 1);
+      g.moveTo(w / 2 - 1, -h / 2 + 1); g.lineTo(-w / 2 + 1, h / 2 - 1);
+      g.stroke();
       break;
     }
     case 'gold':
       // gilded finial shine
-      ctx.fillStyle = 'rgba(255,245,200,0.75)';
-      ctx.fillRect(-w / 2 + 1, -h * 0.18, w - 2, 2);
-      ctx.globalAlpha = 0.7;
-      ctx.drawImage(SPR.glow.gold, -w, -h, w * 2, h * 2);
-      ctx.globalAlpha = 1;
+      g.fillStyle = 'rgba(255,245,200,0.75)';
+      g.fillRect(-w / 2 + 1, -h * 0.18, w - 2, 2);
+      g.globalAlpha = 0.7;
+      g.drawImage(SPR.glow.gold, -w, -h, w * 2, h * 2);
+      g.globalAlpha = 1;
       break;
   }
-  ctx.restore();
+}
+
+function detailSprite(kind, w, h, color) {
+  const key = kind + '|' + Math.round(w * 10) + '|' + Math.round(h * 10) + '|' + color;
+  let s = DETAIL_SPRITES[key];
+  if (!s) {
+    const c = document.createElement('canvas');
+    const W2 = Math.ceil(w) + 8, H2 = Math.ceil(h) + 16;
+    c.width = W2; c.height = H2;
+    const g = c.getContext('2d');
+    g.translate(W2 / 2, H2 / 2);
+    drawKindDetail(g, kind, w, h, color);
+    s = DETAIL_SPRITES[key] = c;
+  }
+  return s;
+}
+
+function drawBlockDetail(b) {
+  const lb = b.plugin.lb;
+  if (lb.w === undefined || lb.h === undefined) return; // Eye parts etc. have no masonry detail
+  const spr = detailSprite(lb.kind, lb.w, lb.h, lb.color);
+  if (b.angle > -0.02 && b.angle < 0.02) {
+    // standing block: straight blit, no canvas transforms
+    ctx.drawImage(spr, b.position.x - spr.width / 2, b.position.y - spr.height / 2);
+  } else {
+    ctx.save();
+    ctx.translate(b.position.x, b.position.y);
+    ctx.rotate(b.angle);
+    ctx.drawImage(spr, -spr.width / 2, -spr.height / 2);
+    ctx.restore();
+  }
 }
 
 function drawBodies() {
