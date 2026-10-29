@@ -59,7 +59,7 @@ python3 -m http.server 8080
 
 ### v2 — the Elizabeth Tower upgrade
 
-- **The tower, for real** — rebuilt from ~290 to **442 blocks** across 17 masonry
+- **The tower, for real** — rebuilt from ~290 to **462 blocks** across 17 masonry
   courses modelled on the actual Elizabeth Tower (96 m on a 12 m footprint,
   researched from parliament.uk + Wikipedia + photo analysis): rusticated plinth →
   golden Anston-limestone shaft with paired lancet windows → ornate string course →
