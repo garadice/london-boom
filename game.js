@@ -13,9 +13,12 @@ const LB = window.LB = {};
 
 /* ---------------- config ---------------- */
 const W = 1600, H = 900;          // world design size
-const GROUND_Y = 790;             // physics ground top (bank)
+const GROUND_Y = 790;             // physics ground top (bank = far traffic lane)
 const WATER_Y = 832;              // water surface
 const HORIZON_Y = 768;            // skyline base
+const ROAD_NEAR_Y = 806;          // near-lane road surface (physics road body top)
+const ROAD_BOTTOM = 830;          // road strip bottom edge (kerb; water starts at WATER_Y)
+const VEHICLE_MAX = 3;            // hard cap: vehicles on screen at once
 const TOWER_X = 400;
 const EYE_X = 1160, EYE_Y = 420, EYE_R_OUT = 235, EYE_R_IN = 196;
 const STEP = 1000 / 60;
@@ -99,6 +102,7 @@ LB.audio = {
   },
   resume() { if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume().catch(function () {}); },
   ok() { return this.ctx && !this.muted && this.voices < 26; },
+  okBell() { return this.ctx && !this.muted && this.voices < 90; },
   throttle(key, ms) {
     const n = performance.now();
     if (this.last[key] && n - this.last[key] < ms) return false;
@@ -108,8 +112,8 @@ LB.audio = {
     this.muted = m;
     if (this.master) this.master.gain.value = m ? 0 : 0.9;
   },
-  noise(dur, vol, filterType, f0, f1, q) {
-    if (!this.ok()) return;
+  noise(dur, vol, filterType, f0, f1, q, force) {
+    if (!(force ? this.okBell() : this.ok())) return;
     const c = this.ctx, t = c.currentTime;
     const src = c.createBufferSource(); src.buffer = this.noiseBuf; src.loop = true;
     const fl = c.createBiquadFilter(); fl.type = filterType; fl.Q.value = q || 1;
@@ -122,8 +126,8 @@ LB.audio = {
     src.start(t); src.stop(t + dur + 0.05);
     this.voices++; src.onended = () => { this.voices--; };
   },
-  tone(type, f0, f1, dur, vol, delay) {
-    if (!this.ok()) return;
+  tone(type, f0, f1, dur, vol, delay, force) {
+    if (!(force ? this.okBell() : this.ok())) return;
     const c = this.ctx, t = c.currentTime + (delay || 0);
     const o = c.createOscillator(); o.type = type;
     o.frequency.setValueAtTime(f0, t);
@@ -240,6 +244,96 @@ LB.audio = {
     const notes = [523, 659, 784, 1047];
     for (let i = 0; i < notes.length; i++) this.tone('triangle', notes[i], notes[i], 0.22, 0.2, i * 0.14);
     this.tone('triangle', 1319, 1319, 0.5, 0.18, notes.length * 0.14);
+  },
+
+  /* ---- Big Ben bells (F5) ----
+     The real Great Bell: 13.5 t, nominal note E3, cracked in September 1859,
+     rotated ~1/8 turn with a lighter hammer + a square cut out of the rim —
+     it has sung with a slight twang ever since (parliament.uk; The Conversation).
+     Synthesis: inharmonic bell partials (hum, prime, tierce, quint, nominal,
+     upper modes), each with its own decay; broken variant detunes every
+     partial and adds a crack-noise burst + a rattly low buzz. */
+  bellTimers: [],
+  bellSeq: { scheduled: 0, played: 0, strikes: 0, active: false },
+  brokenPlayed: false,
+  bellReset() {
+    for (let i = 0; i < this.bellTimers.length; i++) clearTimeout(this.bellTimers[i]);
+    this.bellTimers = [];
+    this.bellSeq = { scheduled: 0, played: 0, strikes: 0, active: false };
+  },
+  bellStrike(f0, vol, dur, broken) {
+    if (!this.okBell()) return;
+    const c = this.ctx, t = c.currentTime;
+    const ratios = [0.5, 1.0, 1.188, 1.53, 2.0, 2.514, 2.662, 3.011];
+    const amps = [0.55, 1.0, 0.62, 0.38, 0.55, 0.22, 0.18, 0.13];
+    const taus = [1.0, 0.62, 0.45, 0.4, 0.3, 0.22, 0.18, 0.13];
+    for (let i = 0; i < ratios.length; i++) {
+      let f = f0 * ratios[i];
+      if (broken) f *= 1 + (Math.random() - 0.5) * 0.07; // crack detune
+      const o = c.createOscillator(); o.type = 'sine';
+      o.frequency.value = f;
+      const g = c.createGain();
+      const tau = Math.max(dur * taus[i] * (broken ? 0.55 : 1), 0.08);
+      const a = vol * amps[i];
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(Math.max(a, 0.0002), t + 0.012);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + tau);
+      o.connect(g); g.connect(this.master);
+      o.start(t); o.stop(t + tau + 0.05);
+      this.voices++; o.onended = () => { this.voices--; };
+    }
+    this.noise(0.03, 0.3 * vol, 'bandpass', f0 * 8, f0 * 4, 2, true); // strike click
+    if (broken) {
+      this.noise(0.28, 0.22 * vol, 'bandpass', 3200, 700, 3, true);   // crack burst
+      this.tone('triangle', f0 * 0.5, f0 * 0.42, 0.9, 0.12, 0, true); // rattle buzz
+    }
+  },
+  bellNote(f0, vol, dur, atMs, broken, isStrike) {
+    const self = this;
+    const timer = setTimeout(function () {
+      self.bellStrike(f0, vol, dur, broken);
+      self.bellSeq.played++;
+      if (isStrike) self.bellSeq.strikes++;
+    }, atMs);
+    this.bellTimers.push(timer);
+  },
+  /* Full 12:00 sequence: Westminster Quarters changes 2,3,4,5 (the real full-hour
+     set; quarter bells G♯4/F♯4/E4/B3) then 12 strikes on the Great Bell (E3). */
+  playTwelve() {
+    if (this.bellSeq.active) return false;
+    this.bellReset();
+    const G_SHARP = 415.30, F_SHARP = 369.99, E4 = 329.63, B3 = 246.94, E3 = 164.81;
+    const changes = [
+      [G_SHARP, F_SHARP, E4, B3], // change 2
+      [E4, F_SHARP, G_SHARP, E4], // change 3
+      [G_SHARP, E4, F_SHARP, B3], // change 4
+      [B3, F_SHARP, G_SHARP, E4]  // change 5
+    ];
+    const CROTCHET = 420, MINIM = 840, PAUSE = 320;
+    let t = 250;
+    for (let ch = 0; ch < changes.length; ch++) {
+      const notes = changes[ch];
+      for (let n = 0; n < notes.length; n++) {
+        this.bellNote(notes[n], 0.3, 3.2, t, false, false);
+        t += (n === 3 ? MINIM + PAUSE : CROTCHET);
+      }
+    }
+    t += 1100; // the breath before Big Ben speaks
+    for (let s = 0; s < 12; s++) {
+      this.bellNote(E3, 0.5, 6.0, t, false, true);
+      t += 1050;
+    }
+    this.bellSeq.scheduled = this.bellTimers.length;
+    this.bellSeq.active = true;
+    const self = this;
+    this.bellTimers.push(setTimeout(function () { self.bellSeq.active = false; }, t + 400));
+    return true;
+  },
+  brokenBell() {
+    this.brokenPlayed = true;
+    this.bellStrike(166.9, 0.5, 3.4, true); // the cracked bell: just sharp of E3, with a twang
+    const self = this;
+    this.bellTimers.push(setTimeout(function () { self.bellStrike(155.56, 0.38, 2.6, true); }, 420));
   }
 };
 
@@ -427,8 +521,10 @@ LB.flash = 0;
 LB.phase = 'title';             // title | play | finale
 LB.weapon = 'meteor';
 LB.weaponFired = { meteor: 0, blackhole: 0, tornado: 0, tnt: 0 };
-LB.events = { explosions: 0, consumed: 0, fireworks: 0, brokenConstraints: 0, shakes: 0, splashes: 0, destroyedAll: 0, resets: 0, tntPlaced: 0, tntExploded: 0 };
-LB.tower = { bodies: [], clockBodies: [], total: 0 };
+LB.events = { explosions: 0, consumed: 0, fireworks: 0, brokenConstraints: 0, shakes: 0, splashes: 0, destroyedAll: 0, resets: 0, tntPlaced: 0, tntExploded: 0, vehiclesExploded: 0, vehiclesFlung: 0, brokenBell: 0 };
+LB.tower = { bodies: [], clockBodies: [], lanternBodies: [], topBodies: [], total: 0 };
+LB.traffic = { vehicles: [], counts: { onScreen: 0, exploded: 0, flung: 0 }, spawnTimer: 1.2, nextId: 1 };
+LB.continueMode = false;
 LB.eye = { rim: [], rimIn: [], pods: [], hub: null, drive: true, spin: 0, led: 1 };
 
 function tag(b, set, kind) {
@@ -494,71 +590,113 @@ function addGround() {
   });
   ground.plugin.lb = { set: 'ground', kind: 'ground', removed: false };
   M.Composite.add(world, ground);
+  addRoad();
+}
+
+// landmark masonry never collides with driving vehicles (they pass on the road)
+function landmarkFilter(b) {
+  b.collisionFilter.category = CAT_LANDMARK;
+  b.collisionFilter.mask = 0xFFFF & ~CAT_VEHICLE;
+  return b;
 }
 
 /* ============================================================
-   ELIZABETH TOWER (~290 bodies, stacked masonry, no glue)
+   ELIZABETH TOWER (~450 blocks, stacked masonry, no glue)
+
+   Modelled on the real tower (researched 2026-10-29: parliament.uk
+   "Facts and figures", Wikipedia "Big Ben", vision analysis of a
+   north-front photo): 96m tall on a 12m square base — very slender;
+   sand-coloured Anston limestone. Bottom→top: rusticated plinth,
+   plain shaft with paired lancet windows, ornate string course, the
+   clock stage (dials ≈ 57% of tower width, opal glass in cast-iron
+   frames), belfry with big louvred pointed arches, the Ayrton Light
+   lantern, a tiered openwork iron crown, gilded finial.
    ============================================================ */
+const TOWER_PLAN = [
+  { kind: 'plinth',      rows: 4,  cols: 14, h: 14 }, // rusticated base
+  { kind: 'plinthCap',   rows: 1,  cols: 14, h: 10 }, // step to the shaft
+  { kind: 'shaft',       rows: 18, cols: 12, h: 13 }, // golden sandstone shaft
+  { kind: 'string',      rows: 1,  cols: 12, h: 7 },  // ornate string course
+  { kind: 'clockBand',   rows: 1,  cols: 12, h: 8 },  // blind arcading
+  { kind: 'clock',       rows: 2,  cols: 12, h: 15 }, // clock stage; middle 4 cols = dial
+  { kind: 'clockBand',   rows: 1,  cols: 12, h: 8 },  // hood-mould canopy
+  { kind: 'cornice',     rows: 1,  cols: 12, h: 7 },  // cornice under the belfry
+  { kind: 'louvre',      rows: 4,  cols: 10, h: 13 }, // belfry: louvred pointed arches
+  { kind: 'cornice',     rows: 1,  cols: 10, h: 7 },  // belfry cornice
+  { kind: 'lantern',     rows: 1,  cols: 8,  h: 10 }, // Ayrton Light
+  { kind: 'lanternRoof', rows: 1,  cols: 6,  h: 9 },  // pyramidal lantern roof
+  { kind: 'spire',       rows: 2,  cols: 6,  h: 9 },  // openwork iron crown, tier 1
+  { kind: 'spire',       rows: 2,  cols: 6,  h: 9 },  // tier 2
+  { kind: 'spire',       rows: 1,  cols: 6,  h: 9 },  // tier 3
+  { kind: 'spire',       rows: 2,  cols: 4,  h: 10 }, // tier 4
+  { kind: 'gold',        rows: 1,  cols: 2,  h: 11 }  // gilded finial
+];
+const TOP_KINDS = { clock: 1, clockFrame: 1, clockBand: 1, cornice: 1, louvre: 1, lantern: 1, lanternRoof: 1, spire: 1, gold: 1 };
+
+function towerBlockColor(kind, rng) {
+  switch (kind) {
+    case 'plinth': return hsl(35, 15, 26 + rng() * 7);
+    case 'plinthCap': return hsl(36, 19, 32 + rng() * 6);
+    case 'shaft': return hsl(43, 40 + rng() * 12, 53 + rng() * 9);
+    case 'shaftWin': return hsl(43, 40 + rng() * 12, 53 + rng() * 9);
+    case 'string': return hsl(38, 26, 38 + rng() * 5);
+    case 'clockBand': return hsl(42, 34, 46 + rng() * 5);
+    case 'clock': return 'hsl(47,' + (44 + (rng() * 10 | 0)) + '%,' + (84 + (rng() * 6 | 0)) + '%)';
+    case 'clockFrame': return hsl(44, 38, 50 + rng() * 6);
+    case 'cornice': return hsl(36, 24, 34 + rng() * 5);
+    case 'louvre': return hsl(222, 11, 17 + rng() * 5);
+    case 'lantern': return hsl(31, 28, 36 + rng() * 6);
+    case 'lanternRoof': return hsl(210, 12, 22 + rng() * 4);
+    case 'spire': return hsl(205, 13, 25 + rng() * 5);
+    case 'gold': return hsl(46, 74, 55 + rng() * 8);
+  }
+  return hsl(43, 45, 55);
+}
+
 function buildTower() {
   const rng = mulberry32(777);
   const bodies = LB.tower.bodies;
   LB.tower.clockBodies = [];
+  LB.tower.lanternBodies = [];
+  LB.tower.topBodies = [];
 
-  // One shared 12-column grid; every course uses a centred SUBSET of it, so every
+  // One shared 14-column grid; every course uses a centred SUBSET of it, so every
   // block stacks in perfect columns (no joint-straddling, no cantilevers) — the
   // solver keeps such stacks standing; anything else slowly buckles and pancakes.
-  const COLS = 12, BW = 11, X0 = TOWER_X - (COLS * BW) / 2;
+  // Base width 154px / height ~525px stays inside the solver-proven envelope
+  // (the old 296-block tower: 132px base, ~495px tall, same block contact width).
+  const COLS = 14, BW = 11, X0 = TOWER_X - (COLS * BW) / 2;
   let topY = GROUND_Y;
+  let shaftRow = 0;
 
-  function course(n, h, baseL, kind) {
-    const start = Math.floor((COLS - n) / 2);
-    const cy = topY - h / 2;
-    for (let c = start; c < start + n; c++) {
-      const x = X0 + (c + 0.5) * BW;
-      let col;
-      if (kind === 'clock') col = '#f2e2b2';
-      else if (kind === 'tip') col = '#1e6e50';
-      else {
-        let h2 = 41 + (rng() - 0.5) * 9, s2 = 50 + (rng() - 0.5) * 14, l2 = baseL + (rng() - 0.5) * 13;
-        col = hsl(h2, s2, l2);
+  for (let s = 0; s < TOWER_PLAN.length; s++) {
+    const sec = TOWER_PLAN[s];
+    const start = Math.floor((COLS - sec.cols) / 2);
+    for (let r = 0; r < sec.rows; r++) {
+      const cy = topY - sec.h / 2;
+      for (let c = start; c < start + sec.cols; c++) {
+        const x = X0 + (c + 0.5) * BW;
+        let kind = sec.kind;
+        if (kind === 'clock' && (c < 5 || c > 8)) kind = 'clockFrame';
+        if (kind === 'shaft' && shaftRow % 3 === 1 && c >= 5 && c <= 8) kind = 'shaftWin';
+        const b = landmarkFilter(M.Bodies.rectangle(x, cy, BW - 0.35, sec.h, {
+          friction: 0.8, frictionStatic: 1.0, restitution: 0.01, density: 0.0012,
+          frictionAir: 0.02, sleepThreshold: 50
+        }));
+        tag(b, 'tower', kind);
+        b.plugin.lb.color = towerBlockColor(kind, rng);
+        b.plugin.lb.w = BW - 0.35;
+        b.plugin.lb.h = sec.h;
+        if (kind === 'clock') LB.tower.clockBodies.push(b);
+        else if (kind === 'lantern') LB.tower.lanternBodies.push(b);
+        if (TOP_KINDS[kind]) LB.tower.topBodies.push(b);
+        M.Composite.add(world, b);
+        bodies.push(b);
       }
-      const b = M.Bodies.rectangle(x, cy, BW - 0.35, h, {
-        friction: 0.8, frictionStatic: 1.0, restitution: 0.01, density: 0.0012,
-        frictionAir: 0.02, sleepThreshold: 50
-      });
-      tag(b, 'tower', kind || 'block');
-      b.plugin.lb.color = col;
-      M.Composite.add(world, b);
-      bodies.push(b);
-      if (kind === 'clock') LB.tower.clockBodies.push(b);
+      topY -= sec.h;
+      if (sec.kind === 'shaft') shaftRow++;
     }
-    topY -= h;
   }
-
-  // plinth: 4 wide courses of 12 — dark stone
-  for (let r = 0; r < 4; r++) course(12, 15, 40);
-  // shaft: 26 courses of 8 — golden sandstone
-  for (let r = 0; r < 26; r++) course(8, 13, 59);
-  // clock section: 3 courses; middle course centre 3 blocks carry the clock face
-  course(8, 12, 55);
-  course(8, 14, 60);
-  (function () {
-    const row = bodies.slice(-8);
-    for (let i = 2; i <= 4; i++) {
-      row[i].plugin.lb.kind = 'clock';
-      row[i].plugin.lb.color = '#f2e2b2';
-    }
-    LB.tower.clockBodies = row.slice(2, 5);
-  })();
-  course(8, 14, 60);
-  // spire taper (all column-aligned)
-  course(6, 10, 46);
-  course(4, 11, 45);
-  course(2, 10, 42);
-  course(2, 10, 42);
-  course(2, 16, 42, 'tip');
-  bodies[bodies.length - 1].plugin.lb.color = '#1e6e50';
-  bodies[bodies.length - 2].plugin.lb.color = '#1e6e50';
 
   LB.tower.total = bodies.length;
 }
@@ -587,7 +725,7 @@ function buildEye() {
   // static legs jam the rotating rim solid. Everything else (meteor, tower
   // blocks, debris) still collides with the wheel normally.
   const EYE_GROUP = BodyGroup();
-  const wheelFilter = { collisionFilter: { group: EYE_GROUP } };
+  const wheelFilter = { collisionFilter: { group: EYE_GROUP, category: CAT_LANDMARK, mask: 0xFFFF & ~CAT_VEHICLE } };
 
   // hub (static bearing)
   const hub = M.Bodies.circle(EYE_X, EYE_Y, 16, Object.assign({ isStatic: true, label: 'hub' }, wheelFilter));
@@ -693,6 +831,349 @@ function buildEye() {
 }
 
 /* ============================================================
+   ROAD + TRAFFIC (F2) — the Embankment road at the river's edge.
+   Far lane rests on the bank top (GROUND_Y), near lane on a road
+   body (ROAD_NEAR_Y). Vehicles are real physics bodies driving
+   kinematically (pose + velocity pinned each step) until a weapon
+   hits them: METEOR/TNT blast → instant explosion; TORNADO/BLACK
+   HOLE → flung as a free body, explodes on hard landing.
+   ============================================================ */
+function addRoad() {
+  const road = M.Bodies.rectangle(800, ROAD_NEAR_Y + 12, 2900, 24, {
+    isStatic: true, friction: 0.95, frictionStatic: 1, restitution: 0,
+    label: 'road'
+  });
+  road.plugin.lb = { set: 'ground', kind: 'road', removed: false };
+  M.Composite.add(world, road);
+}
+
+// collision categories: 1 = default (debris/weapons), 2 = landmarks, 4 = driving vehicles
+const CAT_DEFAULT = 0x0001, CAT_LANDMARK = 0x0002, CAT_VEHICLE = 0x0004;
+
+const VEHICLE_DEFS = {
+  car: { w: 46, h: 17, speed: [2.1, 3.0] },
+  cab: { w: 48, h: 20, speed: [2.3, 2.9] },
+  bus: { w: 80, h: 29, speed: [1.7, 2.1] }
+};
+const CAR_COLORS = ['#c8433c', '#3f7fc4', '#3fae8c', '#d8a53a', '#d8dce4', '#7c56c9', '#e8ecf2', '#5b8f3f'];
+
+function laneSurfaceY(lane) { return lane === 0 ? GROUND_Y : ROAD_NEAR_Y; }
+
+function vehicleByBody(b) {
+  for (let i = 0; i < LB.traffic.vehicles.length; i++) {
+    if (LB.traffic.vehicles[i].body === b) return LB.traffic.vehicles[i];
+  }
+  return null;
+}
+
+function spawnVehicle() {
+  const r = Math.random();
+  const type = r < 0.52 ? 'car' : (r < 0.78 ? 'cab' : 'bus');
+  const def = VEHICLE_DEFS[type];
+  const lane = Math.random() < 0.5 ? 0 : 1;      // 0 = far, 1 = near
+  const dir = lane === 0 ? 1 : -1;                // far lane heads L→R, near lane R→L
+  // spawn just offscreen but INSIDE the despawn bounds (±260) — a car that
+  // spawns beyond the bound would be culled on its first stepTraffic tick
+  const x = dir > 0 ? -rand(80, 220) : W + rand(80, 220);
+  const y = laneSurfaceY(lane) - def.h / 2 - 1;
+  const b = M.Bodies.rectangle(x, y, def.w - 6, def.h, {
+    friction: 0.4, frictionStatic: 0.6, restitution: 0.12, density: 0.003,
+    frictionAir: 0.008, sleepThreshold: 90,
+    label: 'vehicle'
+  });
+  // Driving vehicles never collide with each other or with the landmarks
+  // (they pass behind / in front of them); they DO collide with ground,
+  // road, debris and weapons. Flung vehicles rejoin full collisions.
+  b.collisionFilter.category = CAT_VEHICLE;
+  b.collisionFilter.mask = 0xFFFF & ~(CAT_LANDMARK | CAT_VEHICLE);
+  tag(b, 'vehicle', type);
+  b.plugin.lb.dir = dir;
+  b.plugin.lb.lane = lane;
+  b.plugin.lb.state = 'drive';
+  b.plugin.lb.speed = rand(def.speed[0], def.speed[1]);
+  b.plugin.lb.color = type === 'cab' ? '#1a1a22' : type === 'bus' ? '#c81f2e' : CAR_COLORS[(Math.random() * CAR_COLORS.length) | 0];
+  M.Composite.add(world, b);
+  const v = { id: LB.traffic.nextId++, body: b, type: type, def: def };
+  LB.traffic.vehicles.push(v);
+  LB.traffic.counts.onScreen = LB.traffic.vehicles.length;
+  return v;
+}
+
+function explodeVehicle(v) {
+  const b = v.body, lb = b.plugin.lb;
+  if (lb.removed || lb.state === 'dead') return;
+  lb.state = 'dead';
+  const x = b.position.x, y = b.position.y;
+  const i = LB.traffic.vehicles.indexOf(v);
+  if (i >= 0) LB.traffic.vehicles.splice(i, 1);
+  LB.traffic.counts.onScreen = LB.traffic.vehicles.length;
+  LB.traffic.counts.exploded++;
+  LB.events.vehiclesExploded++;
+  removeBody(b, { silent: true });
+
+  LB.flash = Math.min(LB.flash + 0.3, 1);
+  LB.shake = Math.min(LB.shake + 10, 55);
+  LB.events.shakes++;
+  LB.audio.boom(0.8);
+  P.ring(x, y, 11, 4);
+  P.embers(x, y, 26);
+  P.sparks(x, y, 22, SPR.glow.gold, 8);
+  P.smoke(x, y, 10, true);
+  for (let k = 0; k < 5; k++) P.flame(x + rand(-14, 14), y + rand(-8, 8), rand(-1.5, 1.5), rand(-3, -0.8));
+  P.debrisBurst(x, y, lb.color, 8);
+
+  // the blast chips nearby landmark blocks and shoves everything else
+  for (let k = 0; k < LB.bodies.length; k++) {
+    const o = LB.bodies[k];
+    if (o.isStatic || !o.plugin.lb) continue;
+    const olb = o.plugin.lb;
+    if (olb.removed || olb.set === 'vehicle') continue;
+    const d = dist(o.position.x, o.position.y, x, y);
+    if (d < 46 && olb.set !== 'meteor' && olb.set !== 'tnt') {
+      removeBody(o, {});
+    } else if (d < 170) {
+      const f = 1 - d / 170;
+      M.Sleeping.set(o, false);
+      const ux = (o.position.x - x) / (d || 1), uy = (o.position.y - y) / (d || 1);
+      M.Body.setVelocity(o, { x: o.velocity.x + ux * f * 13, y: o.velocity.y + uy * f * 13 - f * 5 });
+    }
+  }
+  // chain reaction: very close vehicles get flung too
+  for (let k = LB.traffic.vehicles.length - 1; k >= 0; k--) {
+    const other = LB.traffic.vehicles[k];
+    if (dist(other.body.position.x, other.body.position.y, x, y) < 130) flingVehicle(other, x);
+  }
+  if (y > WATER_Y - 14) P.splash(x, WATER_Y, 8);
+}
+
+function flingVehicle(v, fromX) {
+  const b = v.body, lb = b.plugin.lb;
+  if (lb.removed || lb.state !== 'drive') return;
+  lb.state = 'flung';
+  lb.restT = 0;
+  LB.traffic.counts.flung++;
+  LB.events.vehiclesFlung++;
+  // the engine dies; the body rejoins the world and collides with everything
+  b.collisionFilter.category = CAT_DEFAULT;
+  b.collisionFilter.mask = 0xFFFFFFFF;
+  M.Sleeping.set(b, false);
+  const side = b.position.x >= fromX ? 1 : -1;
+  M.Body.setVelocity(b, { x: side * rand(4.5, 8.5), y: rand(-13, -8) });
+  M.Body.setAngularVelocity(b, rand(-0.28, 0.28));
+  LB.audio.thunk();
+  P.sparks(b.position.x, b.position.y, 8, SPR.glow.gold, 5);
+}
+
+function stepTraffic(dt) {
+  const dts = dt / 1000;
+  const V = LB.traffic;
+
+  // keep the road alive: max VEHICLE_MAX at once, spawned on a stagger
+  V.spawnTimer -= dts;
+  if (V.spawnTimer <= 0 && V.vehicles.length < VEHICLE_MAX) {
+    spawnVehicle();
+    V.spawnTimer = rand(0.9, 2.4);
+  }
+
+  for (let i = V.vehicles.length - 1; i >= 0; i--) {
+    const v = V.vehicles[i], b = v.body, lb = b.plugin.lb;
+    if (lb.removed || !isFinite(b.position.x) || !isFinite(b.position.y)) {
+      V.vehicles.splice(i, 1);
+      V.counts.onScreen = V.vehicles.length;
+      continue;
+    }
+    if (lb.state === 'drive') {
+      if (b.position.x < -260 || b.position.x > W + 260) {
+        removeBody(b, { silent: true });
+        V.vehicles.splice(i, 1);
+        V.counts.onScreen = V.vehicles.length;
+        continue;
+      }
+      // kinematic drive: pin pose + velocity every step
+      M.Body.setPosition(b, { x: b.position.x, y: laneSurfaceY(lb.lane) - v.def.h / 2 - 1 });
+      M.Body.setVelocity(b, { x: lb.dir * lb.speed, y: 0 });
+      M.Body.setAngularVelocity(b, 0);
+      M.Body.setAngle(b, 0);
+    } else if (lb.state === 'flung') {
+      const sp = Math.sqrt(b.velocity.x * b.velocity.x + b.velocity.y * b.velocity.y);
+      const grounded = b.position.y > ROAD_NEAR_Y - v.def.h / 2 - 6;
+      if ((sp > 7 && grounded) || b.position.y > WATER_Y + 6) { explodeVehicle(v); continue; }
+      lb.restT = (sp < 1.2 && grounded) ? (lb.restT || 0) + dts : 0;
+      if (lb.restT > 2.2) explodeVehicle(v); // leaking wreck finally goes up
+    }
+  }
+}
+
+/* ---------------- road + vehicle painting ---------------- */
+function drawRoad() {
+  const g = ctx.createLinearGradient(0, GROUND_Y, 0, ROAD_BOTTOM);
+  g.addColorStop(0, '#23243c');
+  g.addColorStop(0.5, '#1a1b30');
+  g.addColorStop(1, '#141528');
+  ctx.fillStyle = g;
+  ctx.fillRect(-1500, GROUND_Y, 4600, ROAD_BOTTOM - GROUND_Y);
+  // kerb strip at the water
+  ctx.fillStyle = '#2c2f4c';
+  ctx.fillRect(-1500, ROAD_BOTTOM, 4600, WATER_Y - ROAD_BOTTOM);
+  ctx.fillStyle = 'rgba(160,170,220,0.18)';
+  ctx.fillRect(-1500, ROAD_BOTTOM, 4600, 2);
+  // lane edge lines
+  ctx.fillStyle = 'rgba(228,232,248,0.62)';
+  ctx.fillRect(-1500, GROUND_Y + 3, 4600, 2.4);
+  ctx.fillRect(-1500, ROAD_BOTTOM - 5, 4600, 2.4);
+  // centre dashes between the lanes
+  ctx.fillStyle = 'rgba(240,230,150,0.6)';
+  const y = (GROUND_Y + ROAD_NEAR_Y) / 2 + 1;
+  for (let x = -1500; x < 3100; x += 46) ctx.fillRect(x, y, 26, 3);
+}
+
+function vehicleShadow(def) {
+  ctx.fillStyle = 'rgba(0,0,12,0.35)';
+  ctx.beginPath();
+  ctx.ellipse(0, def.h / 2 + 1.5, def.w / 2, 3.5, 0, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function drawWheel(wx, wy, r) {
+  ctx.fillStyle = '#0c0c12';
+  ctx.beginPath(); ctx.arc(wx, wy, r, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#3a3f52';
+  ctx.beginPath(); ctx.arc(wx, wy, r * 0.45, 0, Math.PI * 2); ctx.fill();
+}
+
+function drawLights(dir, frontX, y, w) {
+  // headlight (warm, with a small dusk glow) + taillight (red)
+  const hx = frontX * dir;
+  ctx.fillStyle = '#ffe9b0';
+  ctx.fillRect(hx - (dir > 0 ? 0 : 2.5), y, 2.5, 2.5);
+  ctx.globalAlpha = 0.5;
+  ctx.drawImage(SPR.glow.gold, hx + (dir > 0 ? -6 : -2), y - 8, 12, 12);
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = '#ff5a4e';
+  ctx.fillRect(-dir * w - (dir > 0 ? 0 : 2), y, 2, 2);
+}
+
+function drawCarBody(dir, col) {
+  // lower body
+  ctx.fillStyle = col;
+  ctx.beginPath();
+  ctx.moveTo(-20, 6.5);
+  ctx.lineTo(-21, 1);
+  ctx.quadraticCurveTo(-20, -1, -16, -1);
+  ctx.lineTo(-9, -1);
+  ctx.lineTo(-7, -6.5);
+  ctx.quadraticCurveTo(-6, -8, -3, -8);
+  ctx.lineTo(6, -8);
+  ctx.quadraticCurveTo(9, -8, 10, -6);
+  ctx.lineTo(13, -1);
+  ctx.lineTo(18, -1);
+  ctx.quadraticCurveTo(22, -1, 22, 2);
+  ctx.lineTo(21, 6.5);
+  ctx.closePath();
+  ctx.fill();
+  // windows
+  ctx.fillStyle = '#a8bdd8';
+  ctx.fillRect(-6, -6.5, 6.5, 5);
+  ctx.fillRect(1.5, -6.5, 5, 5);
+  // trim
+  ctx.fillStyle = 'rgba(255,255,255,0.22)';
+  ctx.fillRect(-18, -0.5, 37, 1.2);
+  drawWheel(-12, 6.5, 4.4);
+  drawWheel(12, 6.5, 4.4);
+  drawLights(dir, 21, -0.5, 20);
+}
+
+function drawCabBody(dir, col) {
+  // classic London TX cab: boxy, high roof
+  ctx.fillStyle = col;
+  ctx.beginPath();
+  ctx.moveTo(-21, 8);
+  ctx.lineTo(-22, -3);
+  ctx.lineTo(-17, -3);
+  ctx.lineTo(-15, -8.5);
+  ctx.quadraticCurveTo(-14, -10, -11, -10);
+  ctx.lineTo(11, -10);
+  ctx.quadraticCurveTo(14, -10, 15, -8);
+  ctx.lineTo(17, -3);
+  ctx.lineTo(22, -2.5);
+  ctx.quadraticCurveTo(23, 2, 22, 5);
+  ctx.lineTo(21, 8);
+  ctx.closePath();
+  ctx.fill();
+  // windows + yellow roof light
+  ctx.fillStyle = '#9fb4d0';
+  ctx.fillRect(-12, -8, 9, 5.5);
+  ctx.fillRect(-1.5, -8, 9, 5.5);
+  ctx.fillStyle = '#ffcf5e';
+  ctx.fillRect(-2.5, -12, 5, 2);
+  ctx.globalAlpha = 0.4;
+  ctx.drawImage(SPR.glow.gold, -6, -16, 12, 8);
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = 'rgba(255,255,255,0.14)';
+  ctx.fillRect(-19, -1.5, 39, 1.2);
+  drawWheel(-13, 8, 4.6);
+  drawWheel(13, 8, 4.6);
+  drawLights(dir, 22, 0, 21);
+}
+
+function drawBusBody(dir, col) {
+  // red double-decker
+  ctx.fillStyle = col;
+  ctx.beginPath();
+  ctx.moveTo(-35, 12.5);
+  ctx.lineTo(-36, -12);
+  ctx.quadraticCurveTo(-36, -14, -33, -14);
+  ctx.lineTo(33, -14);
+  ctx.quadraticCurveTo(37, -14, 37, -10);
+  ctx.lineTo(37, 8);
+  ctx.quadraticCurveTo(37, 12.5, 33, 12.5);
+  ctx.closePath();
+  ctx.fill();
+  // white roof band
+  ctx.fillStyle = 'rgba(240,240,245,0.75)';
+  ctx.fillRect(-35, -13.5, 71, 2.4);
+  // windows: two decks of four
+  ctx.fillStyle = '#b7c6de';
+  for (let r = 0; r < 2; r++) {
+    const wy = r === 0 ? -9.5 : -0.5;
+    for (let k = 0; k < 4; k++) ctx.fillRect(-30 + k * 15, wy, 10.5, 6.5);
+  }
+  // destination board + open back platform hint
+  ctx.fillStyle = '#ffe9b0';
+  ctx.fillRect(dir > 0 ? 32 : -36, -12.5, 4, 3);
+  ctx.fillStyle = 'rgba(20,10,10,0.5)';
+  ctx.fillRect(dir > 0 ? -36 : 33, 0, 3, 12);
+  // trim
+  ctx.fillStyle = 'rgba(255,255,255,0.2)';
+  ctx.fillRect(-35, 6.5, 71, 1.4);
+  drawWheel(-23, 12.5, 5.6);
+  drawWheel(23, 12.5, 5.6);
+  drawLights(dir, 36, 2, 35);
+}
+
+function drawVehicle(v) {
+  const b = v.body, lb = b.plugin.lb;
+  ctx.save();
+  ctx.translate(b.position.x, b.position.y);
+  ctx.rotate(b.angle);
+  vehicleShadow(v.def);
+  if (v.type === 'bus') drawBusBody(lb.dir, lb.color);
+  else if (v.type === 'cab') drawCabBody(lb.dir, lb.color);
+  else drawCarBody(lb.dir, lb.color);
+  ctx.restore();
+}
+
+function drawVehicles(laneFilter) {
+  for (let i = 0; i < LB.traffic.vehicles.length; i++) {
+    const v = LB.traffic.vehicles[i], lb = v.body.plugin.lb;
+    if (lb.removed) continue;
+    if (laneFilter === 0 && lb.lane !== 0 && lb.state === 'drive') continue;
+    if (laneFilter === 1 && lb.lane === 0 && lb.state === 'drive') continue;
+    drawVehicle(v);
+  }
+}
+
+/* ============================================================
    WEAPONS
    ============================================================ */
 function fire(weapon, wx, wy) {
@@ -777,6 +1258,11 @@ function explodeMeteor(b) {
     const olb = o.plugin.lb;
     if (olb.removed) continue;
     const d = dist(o.position.x, o.position.y, x, y);
+    if (olb.set === 'vehicle') {
+      // METEOR rule: traffic caught in the blast explodes immediately
+      if (d < 100) { const veh = vehicleByBody(o); if (veh) explodeVehicle(veh); }
+      continue;
+    }
     if (d < 62 && olb.set !== 'meteor') {
       removeBody(o, {});
     } else if (d < 340) {
@@ -868,6 +1354,11 @@ function explodeTNT(t) {
     const olb = o.plugin.lb;
     if (olb.removed) continue;
     const d = dist(o.position.x, o.position.y, x, y);
+    if (olb.set === 'vehicle') {
+      // TNT rule: traffic caught in the blast explodes immediately
+      if (d < 110) { const veh = vehicleByBody(o); if (veh) explodeVehicle(veh); }
+      continue;
+    }
     if (d < 74 && olb.set !== 'meteor' && olb.set !== 'tnt') {
       removeBody(o, {});
     } else if (d < 360) {
@@ -985,6 +1476,11 @@ function stepWeapons(dt) {
       const dx = h.x - o.position.x, dy = h.y - o.position.y;
       const r = Math.sqrt(dx * dx + dy * dy);
       if (r > 640) continue;
+      if (o.plugin.lb.set === 'vehicle') {
+        // BLACK HOLE rule: traffic is flung free (engine dies), never eaten
+        if (r < 130) { const veh = vehicleByBody(o); if (veh) flingVehicle(veh, h.x); }
+        continue;
+      }
       const d = Math.max(r, 46);
       let acc = 90 / (d * d);
       if (acc > 0.008) acc = 0.008;
@@ -1037,6 +1533,11 @@ function stepWeapons(dt) {
       const R = 55 + hgt * 0.52;
       const ad = Math.abs(dx);
       if (ad > R * 1.9 || o.position.y < GROUND_Y - 560) continue;
+      if (o.plugin.lb.set === 'vehicle') {
+        // TORNADO rule: traffic caught in the funnel is flung free (engine dies)
+        if (ad < R * 0.95) { const veh = vehicleByBody(o); if (veh) flingVehicle(veh, t.x); }
+        continue;
+      }
       const fall = 1 - ad / (R * 1.9);
       const sgn = dx >= 0 ? 1 : -1;
       M.Sleeping.set(o, false);
@@ -1191,6 +1692,15 @@ M.Events.on(engine, 'collisionStart', function (ev) {
     const la = A.plugin.lb, lbb = B.plugin.lb;
     if ((la && la.set === 'meteor')) { explodeMeteor(A); continue; }
     if ((lbb && lbb.set === 'meteor')) { explodeMeteor(B); continue; }
+    // flung vehicles explode when they slam into anything hard
+    const vLb = (la && la.set === 'vehicle') ? la : (lbb && lbb.set === 'vehicle' ? lbb : null);
+    if (vLb && vLb.state === 'flung') {
+      const rvv = Math.sqrt((A.velocity.x - B.velocity.x) ** 2 + (A.velocity.y - B.velocity.y) ** 2);
+      if (rvv > 6.5) {
+        const veh = vehicleByBody(vLb === la ? A : B);
+        if (veh) { explodeVehicle(veh); continue; }
+      }
+    }
     const rv = Math.sqrt((A.velocity.x - B.velocity.x) ** 2 + (A.velocity.y - B.velocity.y) ** 2);
     if (rv > 8 && ((la && la.set !== 'ground') || (lbb && lbb.set !== 'ground'))) {
       const cx = (A.position.x + B.position.x) / 2, cy = (A.position.y + B.position.y) / 2;
@@ -1205,7 +1715,33 @@ M.Events.on(engine, 'collisionStart', function (ev) {
    INTEGRITY + FINALE + FIREWORKS
    ============================================================ */
 LB.finale = null;
+LB.fireworksTimer = 0;
 let finaleCheck = 0;
+
+function topIntegrity() {
+  // the "bells zone": clock stage + everything above it
+  const T = LB.tower.topBodies;
+  if (!T.length) return 1;
+  let n = 0;
+  for (let i = 0; i < T.length; i++) {
+    const lb = T[i].plugin.lb;
+    if (!lb.removed && dist(T[i].position.x, T[i].position.y, lb.ox, lb.oy) < 55) n++;
+  }
+  return n / T.length;
+}
+
+function launchRocket() {
+  const left = Math.random() < 0.5;
+  LB.rockets.push({
+    x: left ? rand(60, 340) : rand(1260, 1540),
+    y: 796,
+    vx: rand(-0.8, 0.8),
+    vy: -rand(7.5, 10.5),
+    spr: [SPR.glow.gold, SPR.glow.pink, SPR.glow.cyan, SPR.glow.green, SPR.glow.violet, SPR.glow.red][(Math.random() * 6) | 0],
+    t: 0
+  });
+  LB.audio.launch();
+}
 
 function stepFinale(dt) {
   const dts = dt / 1000;
@@ -1216,8 +1752,24 @@ function stepFinale(dt) {
     finaleCheck = 0;
     if (LB.phase === 'play') {
       const tI = integrityOf('tower'), eI = integrityOf('eye');
-      if (tI < 0.45 && eI < 0.45) startFinale();
+      // F3: after KEEP PLAYING the world stays broken — no new finale
+      if (!LB.continueMode && tI < 0.45 && eI < 0.45) startFinale();
       else if (LB.eye.drive && eI < 0.9) { LB.eye.drive = false; }
+      // F5: the bells break when the clock stage / belfry is destroyed (once per collapse)
+      if (!LB.audio.brokenPlayed && topIntegrity() < 0.5) {
+        LB.events.brokenBell++;
+        LB.audio.brokenBell();
+      }
+    }
+  }
+
+  // F3: celebratory fireworks every few seconds while keep-playing
+  if (LB.continueMode && LB.phase === 'play') {
+    LB.fireworksTimer -= dts;
+    if (LB.fireworksTimer <= 0) {
+      LB.fireworksTimer = rand(3.2, 6.5);
+      const n = 1 + (Math.random() * 3 | 0);
+      for (let i = 0; i < n; i++) launchRocket();
     }
   }
 
@@ -1231,17 +1783,8 @@ function stepFinale(dt) {
   }
   if (F.t > F.next && F.rockets < 34) {
     F.next = F.t + rand(0.14, 0.34);
-    const left = Math.random() < 0.5;
-    LB.rockets.push({
-      x: left ? rand(60, 340) : rand(1260, 1540),
-      y: 796,
-      vx: rand(-0.8, 0.8),
-      vy: -rand(7.5, 10.5),
-      spr: [SPR.glow.gold, SPR.glow.pink, SPR.glow.cyan, SPR.glow.green, SPR.glow.violet, SPR.glow.red][(Math.random() * 6) | 0],
-      t: 0
-    });
+    launchRocket();
     F.rockets++;
-    LB.audio.launch();
   }
   for (let i = LB.rockets.length - 1; i >= 0; i--) {
     const rk = LB.rockets[i];
@@ -1273,6 +1816,17 @@ function startFinale() {
   LB.finale = { t: 0, next: 0.2, shown: false, rockets: 0 };
   LB.audio.fanfare();
   LB.audio.crackle(24);
+}
+
+/* F3: KEEP PLAYING — back to the broken world, traffic + fireworks keep going */
+function keepPlaying() {
+  if (LB.phase !== 'finale') return;
+  LB.continueMode = true;
+  LB.finale = null;
+  LB.phase = 'play';
+  LB.fireworksTimer = 1.2;
+  const winEl = document.getElementById('win');
+  if (winEl) winEl.classList.add('hidden');
 }
 
 function destroyAll() {
@@ -1310,16 +1864,25 @@ function resetWorld() {
   LB.meteors = []; LB.holes = []; LB.tornados = []; LB.rockets = [];
   LB.tnts = [];
   LB.decals = [];
-  LB.tower.bodies = []; LB.tower.clockBodies = []; LB.tower.total = 0;
+  LB.tower.bodies = []; LB.tower.clockBodies = []; LB.tower.lanternBodies = [];
+  LB.tower.topBodies = []; LB.tower.total = 0;
   LB.eye.rim = []; LB.eye.rimIn = []; LB.eye.pods = []; LB.eye.hub = null;
   LB.eye.drive = true; LB.eye.led = 1; LB.eye.prevAng = undefined;
   LB.finale = null;
+  LB.continueMode = false;               // F3: fresh world, finale armed again
+  LB.fireworksTimer = 0;
+  LB.traffic.vehicles = [];              // F2: traffic rebuilt below
+  LB.traffic.counts = { onScreen: 0, exploded: 0, flung: 0 };
+  LB.traffic.spawnTimer = 1.0;
+  LB.audio.bellReset();                  // F5: bells rearmed
+  LB.audio.brokenPlayed = false;
   LB.shake = 0; LB.flash = 0;
   LB.weaponFired.meteor = 0; LB.weaponFired.blackhole = 0; LB.weaponFired.tornado = 0;
   LB.weaponFired.tnt = 0;
   LB.events.explosions = 0; LB.events.consumed = 0; LB.events.fireworks = 0;
   LB.events.brokenConstraints = 0; LB.events.shakes = 0; LB.events.splashes = 0;
   LB.events.tntPlaced = 0; LB.events.tntExploded = 0;
+  LB.events.vehiclesExploded = 0; LB.events.vehiclesFlung = 0; LB.events.brokenBell = 0;
   P.clear();
   const winEl = document.getElementById('win');
   if (winEl) winEl.classList.add('hidden');
@@ -1328,6 +1891,8 @@ function resetWorld() {
   buildEye();
   warmup(300);
   P.clear(); // drop any dust spawned by warm-up collisions
+  spawnVehicle();
+  spawnVehicle();
   LB.bodies = M.Composite.allBodies(world);
   LB.events.resets++;
   LB.phase = 'play';
@@ -1434,6 +1999,15 @@ document.getElementById('playBtn').addEventListener('click', function () {
 document.getElementById('againBtn').addEventListener('click', function () {
   LB.audio.init(); LB.audio.resume();
   resetWorld();
+});
+document.getElementById('keepBtn').addEventListener('click', function () {
+  LB.audio.init(); LB.audio.resume();
+  keepPlaying();
+});
+document.getElementById('bellBtn').addEventListener('pointerdown', function (e) {
+  e.stopPropagation();
+  LB.audio.init(); LB.audio.resume();
+  LB.audio.playTwelve(); // the full 12:00: quarters + 12 strikes (mute-aware)
 });
 
 /* ============================================================
@@ -1615,6 +2189,13 @@ function gatherLightSources() {
     if (!cb.plugin.lb.removed) { cx += cb.position.x; cy += cb.position.y; cn++; }
   }
   if (cn > 0) srcs.push({ x: cx / cn, col: 'rgba(255,205,120,', a: 0.5, w: 60 });
+  // Ayrton Light (the lantern glows when Parliament sits — it always sits here)
+  let lx = 0, ln = 0;
+  for (let i = 0; i < LB.tower.lanternBodies.length; i++) {
+    const ob = LB.tower.lanternBodies[i];
+    if (!ob.plugin.lb.removed) { lx += ob.position.x; ln++; }
+  }
+  if (ln > 0) srcs.push({ x: lx / ln, col: 'rgba(255,190,110,', a: 0.42, w: 46 });
   // eye LED
   if (LB.eye.hub && !LB.eye.hub.plugin.lb.removed) srcs.push({ x: LB.eye.hub.position.x, col: 'rgba(140,120,255,', a: 0.35 * LB.eye.led, w: 130 });
   // meteors
@@ -1627,6 +2208,11 @@ function gatherLightSources() {
   for (let i = 0; i < LB.holes.length; i++) srcs.push({ x: LB.holes[i].x, col: 'rgba(170,120,255,', a: 0.5, w: 62 });
   // fireworks rockets
   for (let i = 0; i < LB.rockets.length; i++) srcs.push({ x: LB.rockets[i].x, col: 'rgba(255,220,150,', a: 0.6, w: 40 });
+  // vehicle headlights (only when driving)
+  for (let i = 0; i < LB.traffic.vehicles.length; i++) {
+    const v = LB.traffic.vehicles[i];
+    if (v.body.plugin.lb.state === 'drive') srcs.push({ x: v.body.position.x + v.body.plugin.lb.dir * 20, col: 'rgba(255,225,160,', a: 0.3, w: 30 });
+  }
   return srcs;
 }
 
@@ -1689,6 +2275,143 @@ function topEdge(b) {
   return [v[i0], v[i1]];
 }
 
+/* per-section masonry details, drawn in the block's own (rotated) frame */
+function drawBlockDetail(b) {
+  const lb = b.plugin.lb, w = lb.w, h = lb.h;
+  ctx.save();
+  ctx.translate(b.position.x, b.position.y);
+  ctx.rotate(b.angle);
+  switch (lb.kind) {
+    case 'plinth':
+      ctx.strokeStyle = 'rgba(10,8,6,0.4)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(-w / 2 + 1, -h / 6); ctx.lineTo(w / 2 - 1, -h / 6);
+      ctx.moveTo(-w / 2 + 1, h / 6); ctx.lineTo(w / 2 - 1, h / 6);
+      ctx.stroke();
+      break;
+    case 'plinthCap':
+      ctx.strokeStyle = 'rgba(10,8,6,0.35)';
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(-w / 2 + 1, 0); ctx.lineTo(w / 2 - 1, 0); ctx.stroke();
+      break;
+    case 'shaftWin': {
+      // paired lancet windows (the real shaft's rhythm)
+      const ww = w * 0.26, wh = h * 0.62, gap = w * 0.14;
+      ctx.fillStyle = '#241d10';
+      for (let s = -1; s <= 1; s += 2) {
+        const wx = s * (gap / 2 + ww / 2) - ww / 2;
+        ctx.beginPath();
+        ctx.moveTo(wx, h * 0.18);
+        ctx.lineTo(wx, -h * 0.18);
+        ctx.quadraticCurveTo(wx + ww / 2, -h * 0.42, wx + ww, -h * 0.18);
+        ctx.lineTo(wx + ww, h * 0.18);
+        ctx.closePath();
+        ctx.fill();
+      }
+      // faint warm light inside one pane now and then
+      ctx.fillStyle = 'rgba(255,190,110,0.35)';
+      ctx.fillRect(-gap / 2 - ww * 0.75, -h * 0.1, ww * 0.5, h * 0.24);
+      break;
+    }
+    case 'string':
+      // dentil course
+      ctx.fillStyle = 'rgba(12,9,5,0.45)';
+      for (let dx = -w / 2 + 1.5; dx < w / 2 - 1; dx += 3.4) ctx.fillRect(dx, h / 2 - 2.6, 1.6, 2);
+      break;
+    case 'clockBand': {
+      // blind arcading: three little arches
+      ctx.strokeStyle = 'rgba(30,22,8,0.55)';
+      ctx.lineWidth = 1;
+      for (let s = -1; s <= 1; s++) {
+        const ax = s * w * 0.28;
+        ctx.beginPath();
+        ctx.moveTo(ax - 2.2, h * 0.28);
+        ctx.lineTo(ax - 2.2, -h * 0.05);
+        ctx.quadraticCurveTo(ax, -h * 0.34, ax + 2.2, -h * 0.05);
+        ctx.lineTo(ax + 2.2, h * 0.28);
+        ctx.stroke();
+      }
+      break;
+    }
+    case 'clockFrame':
+      // stone relief around the dial
+      ctx.strokeStyle = 'rgba(35,26,9,0.5)';
+      ctx.lineWidth = 1.2;
+      ctx.strokeRect(-w / 2 + 1.2, -h / 2 + 1.2, w - 2.4, h - 2.4);
+      break;
+    case 'cornice':
+      // protruding course: dark underside
+      ctx.fillStyle = 'rgba(8,6,3,0.5)';
+      ctx.fillRect(-w / 2, h / 2 - 2, w, 2);
+      break;
+    case 'louvre': {
+      // slatted bell-chamber opening + pointed arch head
+      ctx.strokeStyle = 'rgba(70,78,104,0.6)';
+      ctx.lineWidth = 1.1;
+      for (let i2 = -1; i2 <= 1; i2++) {
+        ctx.beginPath();
+        ctx.moveTo(-w / 2 + 2, i2 * h * 0.26);
+        ctx.lineTo(w / 2 - 2, i2 * h * 0.26);
+        ctx.stroke();
+      }
+      ctx.strokeStyle = 'rgba(130,140,175,0.35)';
+      ctx.beginPath();
+      ctx.moveTo(-w / 2 + 1.5, h / 2 - 1);
+      ctx.lineTo(-w / 2 + 1.5, -h * 0.1);
+      ctx.quadraticCurveTo(0, -h / 2 - 2, w / 2 - 1.5, -h * 0.1);
+      ctx.lineTo(w / 2 - 1.5, h / 2 - 1);
+      ctx.stroke();
+      break;
+    }
+    case 'lantern': {
+      // the Ayrton Light — a glowing lantern window
+      ctx.fillStyle = '#ffd489';
+      ctx.fillRect(-w * 0.3, -h * 0.32, w * 0.6, h * 0.64);
+      ctx.strokeStyle = 'rgba(60,40,15,0.8)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(0, -h * 0.32); ctx.lineTo(0, h * 0.32);
+      ctx.moveTo(-w * 0.3, 0); ctx.lineTo(w * 0.3, 0);
+      ctx.stroke();
+      break;
+    }
+    case 'lanternRoof': {
+      // little pyramidal cap
+      ctx.fillStyle = lb.color;
+      ctx.beginPath();
+      ctx.moveTo(-w / 2 - 1.5, h / 2);
+      ctx.lineTo(0, -h / 2 - 4);
+      ctx.lineTo(w / 2 + 1.5, h / 2);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(200,215,255,0.25)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      break;
+    }
+    case 'spire': {
+      // openwork cast-iron tracery
+      ctx.strokeStyle = 'rgba(150,170,205,0.3)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(-w / 2 + 1, -h / 2 + 1); ctx.lineTo(w / 2 - 1, h / 2 - 1);
+      ctx.moveTo(w / 2 - 1, -h / 2 + 1); ctx.lineTo(-w / 2 + 1, h / 2 - 1);
+      ctx.stroke();
+      break;
+    }
+    case 'gold':
+      // gilded finial shine
+      ctx.fillStyle = 'rgba(255,245,200,0.75)';
+      ctx.fillRect(-w / 2 + 1, -h * 0.18, w - 2, 2);
+      ctx.globalAlpha = 0.7;
+      ctx.drawImage(SPR.glow.gold, -w, -h, w * 2, h * 2);
+      ctx.globalAlpha = 1;
+      break;
+  }
+  ctx.restore();
+}
+
 function drawBodies() {
   const bodies = LB.bodies;
   for (let i = 0; i < bodies.length; i++) {
@@ -1728,15 +2451,12 @@ function drawBodies() {
     ctx.strokeStyle = 'rgba(15,10,5,0.35)';
     ctx.lineWidth = 1;
     ctx.stroke();
-    if (lb.kind === 'block' || lb.kind === 'clock') {
+    drawBlockDetail(b);
+    if (lb.kind !== 'gold' && lb.kind !== 'lanternRoof') {
       const e = topEdge(b);
-      ctx.strokeStyle = 'rgba(255,225,170,0.28)';
+      ctx.strokeStyle = 'rgba(255,225,170,0.26)';
       ctx.lineWidth = 1.4;
       ctx.beginPath(); ctx.moveTo(e[0].x, e[0].y); ctx.lineTo(e[1].x, e[1].y); ctx.stroke();
-    }
-    if (lb.kind === 'tip') {
-      ctx.fillStyle = '#e8c05a';
-      ctx.fillRect(b.position.x - 4.5, b.position.y - 3, 9, 2.4);
     }
   }
 }
@@ -1774,30 +2494,65 @@ function drawClockFace(t) {
   }
   if (cn === 0) return;
   cx /= cn; cy /= cn;
+
+  // F4: real local time (both faces show the same, like the real four dials)
+  const now = new Date();
+  const hh = now.getHours() % 12, mm = now.getMinutes(), ss = now.getSeconds() + now.getMilliseconds() / 1000;
+  LB.clock = { h: now.getHours(), m: mm, s: now.getSeconds(), ms: now.getMilliseconds() };
+  const secA = (ss / 60) * Math.PI * 2 - Math.PI / 2;
+  const minA = ((mm + ss / 60) / 60) * Math.PI * 2 - Math.PI / 2;
+  const hourA = ((hh + (mm + ss / 60) / 60) / 12) * Math.PI * 2 - Math.PI / 2;
+
+  const R = 24;
   ctx.globalCompositeOperation = 'lighter';
   ctx.globalAlpha = 0.55 + 0.12 * Math.sin(t * 2);
-  ctx.drawImage(SPR.glow.gold, cx - 55, cy - 55, 110, 110);
+  ctx.drawImage(SPR.glow.gold, cx - R - 28, cy - R - 28, (R + 28) * 2, (R + 28) * 2);
   ctx.globalCompositeOperation = 'source-over';
   ctx.globalAlpha = 1;
-  ctx.beginPath(); ctx.arc(cx, cy, 17, 0, Math.PI * 2);
-  ctx.fillStyle = '#f6e9c4'; ctx.fill();
-  ctx.strokeStyle = '#4d3a14'; ctx.lineWidth = 2; ctx.stroke();
-  ctx.strokeStyle = '#5a4517'; ctx.lineWidth = 1.4;
-  for (let i = 0; i < 12; i++) {
-    const a = (i / 12) * Math.PI * 2;
+
+  function face(x, y, rx, ry) {
     ctx.beginPath();
-    ctx.moveTo(cx + Math.cos(a) * 13.5, cy + Math.sin(a) * 13.5);
-    ctx.lineTo(cx + Math.cos(a) * 15.5, cy + Math.sin(a) * 15.5);
+    ctx.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2);
+    ctx.fillStyle = '#f6e9c4';
+    ctx.fill();
+    ctx.strokeStyle = '#4d3a14';
+    ctx.lineWidth = 2.4;
     ctx.stroke();
+    // inner ring + ticks (12 bold cardinals, others minor)
+    ctx.strokeStyle = 'rgba(90,69,23,0.9)';
+    ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.ellipse(x, y, rx * 0.82, ry * 0.82, 0, 0, Math.PI * 2); ctx.stroke();
+    for (let i = 0; i < 12; i++) {
+      const a = (i / 12) * Math.PI * 2;
+      const big = i % 3 === 0;
+      const r1 = big ? 0.66 : 0.72;
+      ctx.strokeStyle = big ? '#3a2c0c' : 'rgba(90,69,23,0.75)';
+      ctx.lineWidth = big ? 2.6 : 1.3;
+      ctx.beginPath();
+      ctx.moveTo(x + Math.cos(a) * rx * r1, y + Math.sin(a) * ry * r1);
+      ctx.lineTo(x + Math.cos(a) * rx * 0.78, y + Math.sin(a) * ry * 0.78);
+      ctx.stroke();
+    }
+    // hands (projected onto the face ellipse so the side dial foreshortens)
+    function hand(a, len, wid, col) {
+      ctx.strokeStyle = col;
+      ctx.lineWidth = wid;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x + Math.cos(a) * rx * len, y + Math.sin(a) * ry * len);
+      ctx.stroke();
+    }
+    hand(hourA, 0.5, 4.2, '#2c2109');
+    hand(minA, 0.76, 3, '#2c2109');
+    hand(secA, 0.85, 1.4, '#b3342c');
+    ctx.fillStyle = '#2c2109';
+    ctx.beginPath(); ctx.arc(x, y, 2.6, 0, Math.PI * 2); ctx.fill();
   }
-  const mA = -Math.PI / 2 + (t % 60) * (Math.PI * 2 / 60);
-  const hA = -Math.PI / 2 + (t % 720) * (Math.PI * 2 / 720);
-  ctx.strokeStyle = '#2c2109'; ctx.lineWidth = 2;
-  ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + Math.cos(mA) * 12, cy + Math.sin(mA) * 12); ctx.stroke();
-  ctx.lineWidth = 2.6;
-  ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + Math.cos(hA) * 7.5, cy + Math.sin(hA) * 7.5); ctx.stroke();
-  ctx.fillStyle = '#2c2109';
-  ctx.beginPath(); ctx.arc(cx, cy, 1.8, 0, Math.PI * 2); ctx.fill();
+
+  face(cx, cy, R, R);
+  // side dial on the right edge of the clock stage (squashed perspective)
+  face(cx + 66, cy, 9, R);
 }
 
 function drawTNTs() {
@@ -2026,6 +2781,7 @@ function stepWorld(dt) {
   M.Engine.update(engine, dt);
   LB.bodies = M.Composite.allBodies(world);
   stepGuards();
+  stepTraffic(dt);
   P.update(dt / 1000);
   stepDecals(dt / 1000);
   stepFinale(dt);
@@ -2059,9 +2815,12 @@ function render(t) {
   drawClouds(t);
   drawSkyline();
   drawGroundAndWaterBase();
+  drawRoad();
+  drawVehicles(0);       // far lane: behind the landmarks
   drawReflections(t);
   drawDecals();
   drawBodies();
+  drawVehicles(1);       // near lane + flying wrecks: in front
   drawTNTs();
   drawMeteors();
   drawTornados(t);
@@ -2104,17 +2863,48 @@ window.__TEST__ = {
   bodyCounts: function () {
     LB.bodies = M.Composite.allBodies(world);
     let tower = 0, eye = 0, dyn = 0, stat = 0;
+    const kinds = {};
     for (let i = 0; i < LB.bodies.length; i++) {
       const b = LB.bodies[i], lb = b.plugin.lb;
       if (b.isStatic) stat++; else dyn++;
-      if (lb && lb.set === 'tower' && !lb.removed) tower++;
+      if (lb && lb.set === 'tower' && !lb.removed) {
+        tower++;
+        kinds[lb.kind] = (kinds[lb.kind] || 0) + 1;
+      }
       if (lb && lb.set === 'eye' && !lb.removed) eye++;
     }
-    return { tower: tower, eye: eye, dynamic: dyn, static: stat, total: tower + eye };
+    return { tower: tower, eye: eye, dynamic: dyn, static: stat, total: tower + eye, towerKinds: kinds };
   },
   landmarkIntegrity: function () {
-    return { tower: integrityOf('tower'), eye: integrityOf('eye') };
+    return { tower: integrityOf('tower'), eye: integrityOf('eye'), towerTop: topIntegrity() };
   },
+  vehicles: function () {
+    return {
+      counts: LB.traffic.counts,
+      list: LB.traffic.vehicles.map(function (v) {
+        const lb = v.body.plugin.lb;
+        return {
+          id: v.id, type: v.type, state: lb.state, lane: lb.lane, dir: lb.dir,
+          x: Math.round(v.body.position.x), y: Math.round(v.body.position.y)
+        };
+      })
+    };
+  },
+  clock: function () {
+    return LB.clock || null;
+  },
+  bell: function () {
+    return {
+      scheduled: LB.audio.bellSeq.scheduled,
+      played: LB.audio.bellSeq.played,
+      strikes: LB.audio.bellSeq.strikes,
+      active: LB.audio.bellSeq.active,
+      brokenPlayed: LB.audio.brokenPlayed,
+      brokenEvents: LB.events.brokenBell
+    };
+  },
+  playTwelve: function () { LB.audio.init(); return LB.audio.playTwelve(); },
+  keepPlaying: function () { keepPlaying(); },
   tnt: function () {
     // per-block fuse state: id, position, fuse seconds remaining, blink phase
     return LB.tnts.map(function (t) {
@@ -2137,6 +2927,8 @@ window.__TEST__ = {
       particles: P.active, shake: Math.round(LB.shake),
       meteors: LB.meteors.length, holes: LB.holes.length, tornados: LB.tornados.length,
       tnts: LB.tnts.length,
+      vehiclesOnScreen: LB.traffic.vehicles.length,
+      continueMode: LB.continueMode,
       time: Math.round(LB.time * 10) / 10, eyeSpinDeg: Math.round(LB.eye.spin * 10) / 10
     };
   },
@@ -2144,6 +2936,13 @@ window.__TEST__ = {
   screenToWorld: screenToWorld,
   destroyAll: destroyAll,
   reset: function () { resetWorld(); },
+  // headless verification helpers: pump exact fixed steps / paint one frame
+  step: function (n) {
+    n = n || 1;
+    for (let i = 0; i < n; i++) { stepWorld(STEP); acc = 0; }
+    return LB.time;
+  },
+  renderFrame: function () { render(performance.now() / 1000); },
   errors: testErrors
 };
 
@@ -2154,8 +2953,17 @@ addGround();
 buildTower();
 buildEye();
 warmup(300);
+spawnVehicle();
+spawnVehicle();
 LB.bodies = M.Composite.allBodies(world);
 LB.phase = 'title';
 requestAnimationFrame(frame);
+
+/* F6: PWA — register the service worker only on http/https (never on file://) */
+if (location.protocol === 'http:' || location.protocol === 'https:') {
+  if (navigator.serviceWorker) {
+    navigator.serviceWorker.register('./sw.js').catch(function () { /* offline install is optional */ });
+  }
+}
 
 })();

@@ -4,7 +4,12 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>LONDON BOOM! 💥</title>
+<meta name="theme-color" content="#131a4a">
+<link rel="manifest" href="manifest.json">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>💥</text></svg>">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body { width: 100%; height: 100%; overflow: hidden; background: #070b28; }
@@ -40,15 +45,18 @@
     transform: translateY(-3px) scale(1.07);
     box-shadow: 0 6px 22px rgba(255,170,60,0.35), 0 3px 10px rgba(0,0,0,0.5);
   }
-  #muteBtn {
+  #muteBtn, #bellBtn {
     pointer-events: auto; cursor: pointer;
-    position: absolute; top: 12px; right: 14px;
+    position: absolute; top: 12px;
     width: 56px; height: 56px; font-size: 26px;
     background: linear-gradient(180deg, rgba(38,46,92,0.92), rgba(18,23,54,0.92));
     border: 2px solid rgba(130,140,210,0.45); border-radius: 16px;
     box-shadow: 0 4px 14px rgba(0,0,0,0.45);
     display: flex; align-items: center; justify-content: center;
   }
+  #muteBtn { right: 14px; }
+  #bellBtn { right: 82px; font-size: 24px; }
+  #bellBtn:active { transform: translateY(2px); }
   #hint {
     position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%);
     color: rgba(230,235,255,0.75); font-size: 14px; font-weight: 700; letter-spacing: .5px;
@@ -93,6 +101,13 @@
   }
   .bigbtn:hover { transform: translateY(-2px) scale(1.03); }
   .bigbtn:active { transform: translateY(4px); box-shadow: 0 3px 0 #a33415, 0 6px 16px rgba(255,110,40,0.35); }
+  .btnrow { display: flex; flex-direction: column; gap: 18px; align-items: center; }
+  .bigbtn.blue {
+    background: linear-gradient(180deg, #6ec9ff 0%, #3f8fe0 55%, #2a5fc4 100%);
+    box-shadow: 0 8px 0 #1c3f8a, 0 14px 34px rgba(70,140,255,0.45);
+    text-shadow: 0 2px 0 rgba(15,45,110,0.6);
+  }
+  .bigbtn.blue:active { box-shadow: 0 3px 0 #1c3f8a, 0 6px 16px rgba(70,140,255,0.35); }
   @media (max-width: 700px) {
     .wbtn { min-width: 66px; min-height: 60px; padding: 6px 8px; }
     .wbtn .emo { font-size: 24px; }
@@ -112,6 +127,7 @@
     <button class="wbtn" data-w="tnt" type="button"><span class="emo">🧨</span><span class="lbl">TNT</span></button>
   </div>
   <button id="muteBtn" type="button" title="Sound on/off (M)">🔊</button>
+  <button id="bellBtn" type="button" title="Ring the bells! (full 12 o'clock chime)">🔔</button>
   <div id="hint">Click to fire! · 1 / 2 / 3 / 4 or scroll = switch weapon · M = mute</div>
 </div>
 
@@ -127,7 +143,10 @@
   <div class="panel">
     <h1>🎉 YOU DID IT! 🎉</h1>
     <p>London is officially BOOMED.<br>Fireworks for the champion destroyer! 🏆</p>
-    <button id="againBtn" class="bigbtn" type="button">🔁&nbsp;PLAY&nbsp;AGAIN</button>
+    <div class="btnrow">
+      <button id="keepBtn" class="bigbtn blue" type="button">🎆&nbsp;KEEP&nbsp;PLAYING</button>
+      <button id="againBtn" class="bigbtn" type="button">🔁&nbsp;PLAY&nbsp;AGAIN</button>
+    </div>
   </div>
 </div>
 
