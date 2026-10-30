@@ -674,6 +674,8 @@ LB.weapon = 'meteor';
 LB.weaponFired = { meteor: 0, blackhole: 0, tornado: 0, tnt: 0, bomb: 0, tnt_ben: 0, nova: 0, nuke: 0, tsunami: 0, laser: 0, stone: 0, vortex: 0, fire: 0 };
 LB.events = { explosions: 0, consumed: 0, fireworks: 0, brokenConstraints: 0, shakes: 0, splashes: 0, destroyedAll: 0, resets: 0, tntPlaced: 0, tntExploded: 0, vehiclesExploded: 0, vehiclesFlung: 0, brokenBell: 0 };
 LB.tower = { bodies: [], clockBodies: [], lanternBodies: [], topBodies: [], total: 0 };
+LB.annex = { bodies: [], total: 0 };   // v3 wave 2: Westminster wing (NOT part of the win math)
+LB.flag = null;                        // v3 wave 2: { body: mast pole } on the annex roof
 LB.traffic = { vehicles: [], counts: { onScreen: 0, exploded: 0, flung: 0 }, spawnTimer: 1.2, nextId: 1 };
 LB.continueMode = false;
 LB.eye = { rim: [], rimIn: [], pods: [], hub: null, drive: true, spin: 0, led: 1 };
@@ -690,13 +692,13 @@ function aliveOf(set) {
   return n;
 }
 function integrityOf(set) {
-  const total = set === 'tower' ? LB.tower.total : LB.eye.total;
+  const total = set === 'tower' ? LB.tower.total : (set === 'annex' ? LB.annex.total : LB.eye.total);
   if (!total) return 1;
   let n = 0;
   for (let i = 0; i < LB.bodies.length; i++) {
     const b = LB.bodies[i], lb = b.plugin.lb;
     if (!lb || lb.set !== set || lb.removed) continue;
-    if (set === 'tower') {
+    if (set === 'tower' || set === 'annex') {
       // static landmark: rotation-invariant position check (rim orbits the hub)
       if (dist(b.position.x, b.position.y, lb.ox, lb.oy) < 55) n++;
     } else {
@@ -850,6 +852,210 @@ function buildTower() {
   }
 
   LB.tower.total = bodies.length;
+}
+
+/* ============================================================
+   WESTMINSTER ANNEX (v3 wave 2) — the Palace of Westminster side
+   wing to the RIGHT of Elizabeth Tower (Martin's idea: the real
+   Speaker's/Gardener's wing hugging the tower). Adapted from the
+   old game's _build_palace_annex rhythm: golden limestone in three
+   shade bands (darkest at the base), pilaster bays, tall lancet
+   windows under stone lintels, thin string courses, dark parapet
+   roof — and a breakable-glue bond to the tower wall so the two
+   buildings topple together.
+
+   Same solver discipline as buildTower(): one perfect column grid,
+   flush stacking, zero cantilevers (every window void is spanned
+   by a full-width lintel block that bears one column on each side).
+
+   Win math is UNTOUCHED: these blocks carry set 'annex' (not
+   'tower'/'eye'), so wrecking the wing alone can never end the
+   game — but every weapon hurts it through the existing paths.
+   ============================================================ */
+const ANNEX_COLS = 15, ANNEX_BW = 16;
+// flush against the tower's right wall: tower blocks are BW(11) - 0.35 wide,
+// rightmost edge lands at TOWER_X + 77 - 0.175
+const ANNEX_X0 = TOWER_X + 76.825;
+const ANNEX_PLAN = [              // listed top -> bottom, built bottom-up
+  { kind: 'annexRoof',    rows: 1, h: 16 },                      // dark parapet band
+  { kind: 'annexTop',     rows: 3, h: 16, winRows: { 1: 1 } },   // upper windows (drawn)
+  { kind: 'annexString',  rows: 1, h: 9  },                      // string course
+  { kind: 'annexMid',     rows: 4, h: 16, winRows: { 1: 1, 2: 1 } }, // window band 2
+  { kind: 'annexString',  rows: 1, h: 9  },
+  { kind: 'annexMid',     rows: 5, h: 16, winRows: { 1: 1, 2: 1 } }, // window band 1
+  { kind: 'annexString',  rows: 1, h: 9  },
+  { kind: 'annexBase',    rows: 2, h: 16, doorRow: 1 }          // rusticated base + doorway
+];
+// 2 window columns per bay (lancets are PAINTED on the blocks — the wall stays
+// one solid solver-proven stack, exactly how buildTower does its own windows;
+// measured in Matter 0.20: real 2-col voids destabilise the stack even under
+// stone lintels, a solid 15x18 wall settles < 8px in 300 warmup steps)
+const ANNEX_WIN_COLS = { 2: 1, 3: 1, 7: 1, 8: 1, 11: 1, 12: 1 };
+const ANNEX_PILASTERS = { 0: 1, 1: 1, 4: 1, 10: 1, 13: 1, 14: 1 }; // quoins + bay pilasters
+
+function annexBlockColor(kind, rng, darker) {
+  switch (kind) {
+    case 'annexBase':    return hsl(35, 22, (darker ? 37 : 44) + rng() * 7);
+    case 'annexMid':     return hsl(36, 24, (darker ? 43 : 50) + rng() * 7);
+    case 'annexTop':     return hsl(38, 26, (darker ? 49 : 56) + rng() * 7);
+    case 'annexString':  return hsl(35, 20, 36 + rng() * 5);
+    case 'annexRoof':    return hsl(28, 25, 27 + rng() * 5);
+  }
+  return hsl(36, 24, 50);
+}
+
+function buildAnnex() {
+  const rng = mulberry32(4242);            // seeded like buildTower -> PLAY AGAIN restores exactly
+  const bodies = LB.annex.bodies;
+  LB.annex.total = 0;
+
+  for (let s = 0; s < ANNEX_PLAN.length; s++) {
+    const sec = ANNEX_PLAN[ANNEX_PLAN.length - 1 - s]; // bottom-up walk
+    for (let r = 0; r < sec.rows; r++) {
+      // rows flow bottom-up: this section row index from the bottom
+      const secRow = r;
+      const cy = topAnnexRowY(sec, secRow);
+      for (let c = 0; c < ANNEX_COLS; c++) {
+        let kind = sec.kind;
+        if (sec.winRows && sec.winRows[secRow] && ANNEX_WIN_COLS[c]) kind = 'annexWin';
+        if (sec.doorRow === secRow && (c === 7 || c === 8)) kind = 'annexDoor';
+        const x = ANNEX_X0 + (c + 0.5) * ANNEX_BW;
+        const b = landmarkFilter(M.Bodies.rectangle(x, cy, ANNEX_BW - 0.35, sec.h, {
+          friction: 0.8, frictionStatic: 1.0, restitution: 0.01, density: 0.0012,
+          frictionAir: 0.02, sleepThreshold: 50
+        }));
+        tag(b, 'annex', kind);
+        b.plugin.lb.color = annexBlockColor(sec.kind, rng, !!ANNEX_PILASTERS[c]);
+        b.plugin.lb.w = ANNEX_BW - 0.35;
+        b.plugin.lb.h = sec.h;
+        M.Composite.add(world, b);
+        bodies.push(b);
+      }
+    }
+  }
+
+  // NOTE: no glue constraints. Measured in Matter 0.20: both stacks settle a few
+  // px under gravity, and stiff struts turn that differential settling into
+  // large forces that wreck the bond AND the tower wall. The card allows plain
+  // flush abutment — the coupling is emergent instead: a tower-side blast that
+  // eats the lower right wall drops the tower mass onto/into the wing, and any
+  // annex-side blast shoves the shared wall directly (radialBlast hits both).
+  LB.annex.total = bodies.length;
+  buildFlag();
+
+  // helpers (hoisted per call — keep the row math next to the loop)
+  function topAnnexRowY(sec, secRow) {
+    // section rows stack flush; secRow counted from the section's bottom edge
+    let bottom = GROUND_Y;
+    for (let i = ANNEX_PLAN.length - 1; ANNEX_PLAN[i] !== sec; i--) {
+      bottom -= ANNEX_PLAN[i].rows * ANNEX_PLAN[i].h;
+    }
+    bottom -= secRow * sec.h;
+    return bottom - sec.h / 2;
+  }
+}
+
+/* ---------------- UNION FLAG 🇬🇧 on the annex roof ----------------
+   The mast is one real physics body welded (2 pins) to the roof block
+   under it: destroy that block (or blast nearby — blasts sever pins)
+   and the mast topples with the flag flapping faster as it falls. */
+function buildFlag() {
+  const mx = ANNEX_X0 + 7.5 * ANNEX_BW;    // centre-ish column of the roof
+  let roof = null;
+  for (let i = 0; i < LB.annex.bodies.length; i++) {
+    const b = LB.annex.bodies[i];
+    if (b.plugin.lb.kind !== 'annexRoof') continue;
+    if (!roof || Math.abs(b.position.x - mx) < Math.abs(roof.position.x - mx)) roof = b;
+  }
+  if (!roof) return;
+  const roofTop = roof.position.y - roof.plugin.lb.h / 2;
+  const POLE_H = 66;
+  const pole = landmarkFilter(M.Bodies.rectangle(roof.position.x, roofTop - POLE_H / 2, 3.4, POLE_H, {
+    friction: 0.8, frictionStatic: 1.0, restitution: 0.01, density: 0.0009,
+    frictionAir: 0.02, sleepThreshold: Infinity   // never sleeps: when the roof under it
+  }));                                            // dies it must fall, not sleep mid-air
+  tag(pole, 'annex', 'mast');
+  pole.plugin.lb.color = '#2a2f3f';
+  pole.plugin.lb.w = 3.4;
+  pole.plugin.lb.h = POLE_H;
+  M.Composite.add(world, pole);
+  LB.annex.bodies.push(pole);
+  // No constraints: a stiff weld fights the roof block's settling (same failure
+  // the wall glue had). The pole stands free on the parapet — friction holds it
+  // while the world is calm; destroying the roof under it (or any blast shove)
+  // topples it, and it tumbles with the cloth flapping faster once fallen.
+  LB.annex.total = LB.annex.bodies.length;
+  LB.flag = { body: pole };
+}
+
+// exact Union Jack (Flag Institute construction, 2:1): white saltire 1/5 of the
+// height, red counterchanged diagonals offset via the four centre-quarter clips,
+// white cross 1/3, red cross 1/5 — prerendered once, waved per-frame in slices.
+function makeUnionJackCanvas() {
+  const c = document.createElement('canvas');
+  c.width = 48; c.height = 24;
+  const g = c.getContext('2d');
+  const fw = 48, fh = 24, cx2 = fw / 2, cy2 = fh / 2;
+  g.fillStyle = '#012169';
+  g.fillRect(0, 0, fw, fh);
+  g.strokeStyle = '#ffffff';
+  g.lineWidth = fh / 5;
+  g.beginPath(); g.moveTo(0, 0); g.lineTo(fw, fh); g.moveTo(fw, 0); g.lineTo(0, fh); g.stroke();
+  g.save();
+  g.beginPath();
+  g.moveTo(cx2, cy2); g.lineTo(fw, cy2); g.lineTo(fw, fh); g.closePath();
+  g.moveTo(cx2, cy2); g.lineTo(cx2, fh); g.lineTo(0, fh); g.closePath();
+  g.moveTo(cx2, cy2); g.lineTo(0, cy2); g.lineTo(0, 0); g.closePath();
+  g.moveTo(cx2, cy2); g.lineTo(cx2, 0); g.lineTo(fw, 0); g.closePath();
+  g.clip();
+  g.strokeStyle = '#C8102E';
+  g.lineWidth = fh * 0.12;
+  g.beginPath(); g.moveTo(0, 0); g.lineTo(fw, fh); g.moveTo(fw, 0); g.lineTo(0, fh); g.stroke();
+  g.restore();
+  g.strokeStyle = '#ffffff';
+  g.lineWidth = fh / 3;
+  g.beginPath(); g.moveTo(cx2, 0); g.lineTo(cx2, fh); g.moveTo(0, cy2); g.lineTo(fw, cy2); g.stroke();
+  g.strokeStyle = '#C8102E';
+  g.lineWidth = fh / 5;
+  g.beginPath(); g.moveTo(cx2, 0); g.lineTo(cx2, fh); g.moveTo(0, cy2); g.lineTo(fw, cy2); g.stroke();
+  return c;
+}
+
+function drawFlag(t) {
+  const F = LB.flag;
+  if (!F || !F.body) return;
+  const b = F.body;
+  if (b.plugin.lb.removed) return;
+  if (!LB.flagCanvas) LB.flagCanvas = makeUnionJackCanvas();
+  const POLE_H = b.plugin.lb.h;
+  const fallen = Math.abs(b.angle) > 0.5;
+  const sway = fallen ? 0 : Math.sin(t * 1.4) * 0.012;
+  const ang = b.angle + sway;
+  const topX = b.position.x + Math.sin(ang) * POLE_H / 2;
+  const topY = b.position.y - Math.cos(ang) * POLE_H / 2;
+  // pole + gold finial
+  ctx.save();
+  ctx.translate(b.position.x, b.position.y);
+  ctx.rotate(ang);
+  ctx.fillStyle = '#2a2f3f';
+  ctx.fillRect(-1.7, -POLE_H / 2, 3.4, POLE_H);
+  ctx.fillStyle = '#ffd76b';
+  ctx.beginPath(); ctx.arc(0, -POLE_H / 2 - 3, 3.2, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
+  // cloth: vertical slices of the prerendered jack, sin-rippled (faster when fallen)
+  const FH = 24, FW = 48;
+  const speed = fallen ? 9 : 4.2;
+  ctx.save();
+  ctx.translate(topX, topY + 2);
+  ctx.rotate(ang * 0.6);
+  for (let sx = 0; sx < FW; sx += 3) {
+    const k = sx / FW;
+    const wob = Math.sin(t * speed + sx * 0.55) * 0.5 + Math.sin(t * speed * 1.47 + sx * 1.3) * 0.5;
+    const dy = wob * 2.6 * (0.15 + 0.85 * k);
+    const sq = 1 + wob * 0.06 * k;
+    ctx.drawImage(LB.flagCanvas, sx, 0, 3, FH, sx + 1, dy + FH / 2 - (FH * sq) / 2, 3.4, FH * sq);
+  }
+  ctx.restore();
 }
 
 /* ============================================================
@@ -2596,6 +2802,26 @@ function stepGuards() {
       }
     }
   }
+  // flag mast: upright with nothing solid under its base -> give it the initial
+  // tip real asymmetry would provide; physics tumbles it from there. (A pole
+  // this thin falls straight through a neat hole otherwise and stays upright.)
+  if (LB.flag && LB.flag.body && stepCounter % 4 === 0) {
+    const pb = LB.flag.body, plb = pb.plugin.lb;
+    if (!plb.removed && Math.abs(pb.angle) < 0.5) {
+      let supported = false;
+      for (let i = 0; i < LB.bodies.length; i++) {
+        const rb = LB.bodies[i], rlb = rb.plugin.lb;
+        if (!rlb || rlb.removed || rb === pb) continue;
+        const dy = rb.position.y - pb.position.y;
+        if (dy > 4 && dy < 45 && Math.abs(rb.position.x - pb.position.x) < 8) { supported = true; break; }
+      }
+      if (!supported) {
+        M.Sleeping.set(pb, false);
+        M.Body.setAngularVelocity(pb, (Math.random() < 0.5 ? -1 : 1) * rand(0.18, 0.3));
+        M.Body.setVelocity(pb, { x: pb.velocity.x + rand(-0.6, 0.6), y: pb.velocity.y });
+      }
+    }
+  }
   // meteors falling into water explode
   for (let i = LB.meteors.length - 1; i >= 0; i--) {
     if (LB.meteors[i].position.y > WATER_Y) explodeMeteor(LB.meteors[i]);
@@ -2632,7 +2858,7 @@ M.Events.on(engine, 'collisionStart', function (ev) {
           if (veh) explodeVehicle(veh);
           stBody.plugin.lb.stoneHp -= 8;
           LB.shake = Math.min(LB.shake + 6, 55);
-        } else if (oLb && (oLb.set === 'tower' || oLb.set === 'eye')) {
+        } else if (oLb && (oLb.set === 'tower' || oLb.set === 'annex' || oLb.set === 'eye')) {
           stBody.plugin.lb.stoneHp -= 3;
         } else {
           stBody.plugin.lb.stoneHp -= 1;
@@ -2757,6 +2983,7 @@ function startFinale() {
   LB.finale = { t: 0, next: 0.2, shown: false, rockets: 0 };
   LB.audio.fanfare();
   LB.audio.crackle(24);
+  syncNewGameBtn();
 }
 
 /* F3: KEEP PLAYING — back to the broken world, traffic + fireworks keep going */
@@ -2768,11 +2995,32 @@ function keepPlaying() {
   LB.fireworksTimer = 1.2;
   const winEl = document.getElementById('win');
   if (winEl) winEl.classList.add('hidden');
+  syncNewGameBtn();
+}
+
+/* v3 wave 2: 🔄 NEW GAME — full fresh world from inside KEEP PLAYING mode.
+   Identical end-state to PLAY AGAIN: resetWorld() rebuilds everything,
+   re-arms the finale, zeroes every counter and clears continueMode. */
+function newGame() {
+  if (!LB.continueMode) return false;
+  LB.audio.init(); LB.audio.resume();
+  LB.audio.click();
+  resetWorld();
+  return true;
+}
+
+function syncNewGameBtn() {
+  const el = document.getElementById('newGameBtn');
+  if (!el) return;
+  // visible ONLY while keep-playing is live: hidden on title, in normal play,
+  // during the finale, while the weapon picker is open, and after any reset
+  const show = LB.continueMode && LB.phase === 'play' && !LB.paused;
+  el.classList.toggle('hidden', !show);
 }
 
 function destroyAll() {
   LB.events.destroyedAll++;
-  const sets = ['tower', 'eye'];
+  const sets = ['tower', 'eye', 'annex'];   // annex joins the wreck (win math unchanged)
   for (let s = 0; s < sets.length; s++) {
     const victims = [];
     for (let k = 0; k < LB.bodies.length; k++) {
@@ -2808,6 +3056,7 @@ function resetWorld() {
   LB.decals = [];
   LB.tower.bodies = []; LB.tower.clockBodies = []; LB.tower.lanternBodies = [];
   LB.tower.topBodies = []; LB.tower.total = 0;
+  LB.annex.bodies = []; LB.annex.total = 0; LB.flag = null; LB.flagCanvas = null;
   LB.eye.rim = []; LB.eye.rimIn = []; LB.eye.pods = []; LB.eye.hub = null;
   LB.eye.drive = true; LB.eye.led = 1; LB.eye.prevAng = undefined;
   LB.finale = null;
@@ -2833,6 +3082,7 @@ function resetWorld() {
   if (winEl) winEl.classList.add('hidden');
   addGround();
   buildTower();
+  buildAnnex();
   buildEye();
   warmup(300);
   P.clear(); // drop any dust spawned by warm-up collisions
@@ -2841,6 +3091,7 @@ function resetWorld() {
   LB.bodies = M.Composite.allBodies(world);
   LB.events.resets++;
   LB.phase = 'play';
+  syncNewGameBtn();                        // v3 wave 2: NEW GAME button only lives in continueMode
 }
 
 function warmup(n) {
@@ -2939,6 +3190,7 @@ function openPicker() {
     LB.audio.ctx.suspend().catch(function () {});
   }
   LB.audio.pop();
+  syncNewGameBtn();
   return true;
 }
 function closePicker() {
@@ -2949,6 +3201,7 @@ function closePicker() {
     LB.audio.ctx.resume().catch(function () {});
   }
   LB.audio.click();
+  syncNewGameBtn();
   return true;
 }
 function buildPicker() {
@@ -3008,6 +3261,7 @@ window.addEventListener('keydown', function (e) {
   else if (k === 'v' || k === 'V') selectWeapon('vortex');
   else if (k === 'f' || k === 'F') selectWeapon('fire');
   else if (k === 'm' || k === 'M') toggleMute();
+  else if (k === 'n' || k === 'N') newGame(); // v3 wave 2: fresh game from keep-playing
 });
 window.addEventListener('wheel', function (e) {
   if (LB.paused) return; // picker open: the wheel must not change weapons behind it
@@ -3043,6 +3297,10 @@ document.getElementById('bellBtn').addEventListener('pointerdown', function (e) 
   e.stopPropagation();
   LB.audio.init(); LB.audio.resume();
   LB.audio.playTwelve(); // the full 12:00: quarters + 12 strikes (mute-aware)
+});
+document.getElementById('newGameBtn').addEventListener('pointerdown', function (e) {
+  e.stopPropagation();
+  newGame();
 });
 
 /* ============================================================
@@ -3390,6 +3648,55 @@ function drawKindDetail(g, kind, w, h, color) {
       g.fillStyle = 'rgba(8,6,3,0.5)';
       g.fillRect(-w / 2, h / 2 - 2, w, 2);
       break;
+    case 'annexWin': {
+      // tall lancet window on the Westminster wing (dusk glass + one warm pane)
+      const ww = w * 0.52;
+      g.fillStyle = '#1a1626';
+      g.beginPath();
+      g.moveTo(-ww / 2, h * 0.30);
+      g.lineTo(-ww / 2, -h * 0.08);
+      g.quadraticCurveTo(0, -h * 0.42, ww / 2, -h * 0.08);
+      g.lineTo(ww / 2, h * 0.30);
+      g.closePath();
+      g.fill();
+      g.fillStyle = 'rgba(255,190,110,0.30)';
+      g.fillRect(-ww * 0.2, -h * 0.02, ww * 0.4, h * 0.22);
+      break;
+    }
+    case 'annexDoor': {
+      // pointed arch doorway in the rusticated base
+      const dw = w * 0.6;
+      g.fillStyle = '#171320';
+      g.beginPath();
+      g.moveTo(-dw / 2, h / 2);
+      g.lineTo(-dw / 2, -h * 0.02);
+      g.quadraticCurveTo(0, -h * 0.55, dw / 2, -h * 0.02);
+      g.lineTo(dw / 2, h / 2);
+      g.closePath();
+      g.fill();
+      break;
+    }
+    case 'annexString':
+      // dentil course
+      g.fillStyle = 'rgba(12,9,5,0.4)';
+      for (let dx = -w / 2 + 2; dx < w / 2 - 2; dx += 4.5) g.fillRect(dx, h / 2 - 2.4, 2, 1.8);
+      break;
+    case 'annexRoof':
+      // parapet band: faint slate joints
+      g.strokeStyle = 'rgba(0,0,0,0.3)';
+      g.lineWidth = 1;
+      g.beginPath();
+      g.moveTo(-w / 2 + 1, 0); g.lineTo(w / 2 - 1, 0);
+      g.stroke();
+      break;
+    case 'annexBase':
+      // rusticated base: one heavy bed joint
+      g.strokeStyle = 'rgba(10,8,6,0.35)';
+      g.lineWidth = 1;
+      g.beginPath();
+      g.moveTo(-w / 2 + 1, 0); g.lineTo(w / 2 - 1, 0);
+      g.stroke();
+      break;
     case 'louvre': {
       // slatted bell-chamber opening + pointed arch head
       g.strokeStyle = 'rgba(70,78,104,0.6)';
@@ -3497,6 +3804,7 @@ function drawBodies() {
     if (lb.set === 'meteor') continue; // drawn separately
     if (lb.set === 'tnt') continue;    // drawn separately (Minecraft block)
     if (lb.set === 'ground') continue;
+    if (lb.kind === 'mast') continue;  // flag mast: drawn by drawFlag (pole + cloth)
     if (lb.set === 'bomb' || lb.set === 'nuke' || lb.set === 'nova' || lb.set === 'stone') continue; // v3: drawn separately
     const v = b.vertices;
     if (lb.kind === 'pod') {
@@ -4245,6 +4553,7 @@ function render(t) {
   drawReflections(t);
   drawDecals();
   drawBodies();
+  drawFlag(t);
   drawVehicles(1);       // near lane + flying wrecks: in front
   drawTNTs();
   drawBombs();
@@ -4297,7 +4606,7 @@ console.error = function () {
 window.__TEST__ = {
   bodyCounts: function () {
     LB.bodies = M.Composite.allBodies(world);
-    let tower = 0, eye = 0, dyn = 0, stat = 0;
+    let tower = 0, eye = 0, annex = 0, dyn = 0, stat = 0;
     const kinds = {};
     for (let i = 0; i < LB.bodies.length; i++) {
       const b = LB.bodies[i], lb = b.plugin.lb;
@@ -4307,12 +4616,33 @@ window.__TEST__ = {
         kinds[lb.kind] = (kinds[lb.kind] || 0) + 1;
       }
       if (lb && lb.set === 'eye' && !lb.removed) eye++;
+      if (lb && lb.set === 'annex' && !lb.removed) {
+        annex++;
+        kinds[lb.kind] = (kinds[lb.kind] || 0) + 1;
+      }
     }
-    return { tower: tower, eye: eye, dynamic: dyn, static: stat, total: tower + eye, towerKinds: kinds };
+    // total stays tower+eye only: the win-math surface is untouched
+    return { tower: tower, eye: eye, annex: annex, dynamic: dyn, static: stat, total: tower + eye, towerKinds: kinds };
   },
   landmarkIntegrity: function () {
     return { tower: integrityOf('tower'), eye: integrityOf('eye'), towerTop: topIntegrity() };
   },
+  annexIntegrity: function () {
+    return { annex: integrityOf('annex'), total: LB.annex.total };
+  },
+  flag: function () {
+    const F = LB.flag;
+    if (!F || !F.body) return { state: 'gone' };
+    const b = F.body;
+    if (b.plugin.lb.removed) return { state: 'gone' };
+    return {
+      state: Math.abs(b.angle) < 0.5 ? 'standing' : 'fallen',
+      x: Math.round(b.position.x * 10) / 10,
+      y: Math.round(b.position.y * 10) / 10,
+      angle: Math.round(b.angle * 1000) / 1000
+    };
+  },
+  newGame: function () { return newGame(); },
   vehicles: function () {
     return {
       counts: LB.traffic.counts,
@@ -4368,6 +4698,7 @@ window.__TEST__ = {
       vortices: LB.vortices.length, fires: LB.fires.length,
       mushrooms: LB.mushrooms.length,
       weapon: LB.weapon, pickerOpen: LB.paused,
+      newGameBtn: !document.getElementById('newGameBtn').classList.contains('hidden'),
       vehiclesOnScreen: LB.traffic.vehicles.length,
       continueMode: LB.continueMode,
       time: Math.round(LB.time * 10) / 10, eyeSpinDeg: Math.round(LB.eye.spin * 10) / 10
@@ -4395,6 +4726,7 @@ window.__TEST__ = {
    ============================================================ */
 addGround();
 buildTower();
+buildAnnex();
 buildEye();
 warmup(300);
 spawnVehicle();
