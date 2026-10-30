@@ -74,6 +74,21 @@
   #muteBtn { right: 14px; }
   #bellBtn { right: 82px; font-size: 24px; }
   #bellBtn:active { transform: translateY(2px); }
+  /* v3 wave 2: 🔄 NEW GAME — only visible in KEEP PLAYING mode (after a win) */
+  #newGameBtn {
+    pointer-events: auto; cursor: pointer;
+    position: absolute; top: 12px; left: 14px;
+    width: 56px; height: 56px;
+    background: linear-gradient(180deg, rgba(38,46,92,0.92), rgba(18,23,54,0.92));
+    border: 2px solid rgba(130,140,210,0.45); border-radius: 16px;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.45);
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px;
+    color: #cfd6ff; font-family: inherit;
+  }
+  #newGameBtn .emo { font-size: 23px; line-height: 1.1; filter: drop-shadow(0 2px 3px rgba(0,0,0,.5)); }
+  #newGameBtn .lbl { font-size: 8px; font-weight: 700; letter-spacing: .5px; }
+  #newGameBtn:active { transform: translateY(2px); }
+  #newGameBtn.hidden { display: none; }
   #hint {
     position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%);
     color: rgba(230,235,255,0.75); font-size: 14px; font-weight: 700; letter-spacing: .5px;
@@ -165,6 +180,7 @@
 <canvas id="game"></canvas>
 
 <div id="hud">
+  <button id="newGameBtn" type="button" class="hidden" title="Play a fresh game (N)"><span class="emo">🔄</span><span class="lbl">NEW GAME</span></button>
   <button id="curWeapon" class="wbtn active" data-w="meteor" type="button" title="Tap to pick a weapon"><span class="emo">☄️</span><span class="lbl">METEOR</span></button>
   <button id="muteBtn" type="button" title="Sound on/off (M)">🔊</button>
   <button id="bellBtn" type="button" title="Ring the bells! (full 12 o'clock chime)">🔔</button>
