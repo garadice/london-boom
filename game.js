@@ -1541,25 +1541,46 @@ function explodeTNT(t) {
   const b = t.body;
   if (!b.plugin.lb || b.plugin.lb.removed) return;
   const x = b.position.x, y = b.position.y;
+  // TNT BEN 🧱 detonates ~3x stronger than plain TNT; plain params untouched.
+  const ben = !!t.ben;
+  const CORE = ben ? 112 : 74;        // vaporize core radius (px)
+  const PUSH = ben ? 520 : 360;       // radial push radius (px)
+  const FLING = ben ? 90 : 30;        // push force (~3x for ben)
+  const LIFT = ben ? 26 : 10;         // upward bias of the push
+  const VEH_CORE = ben ? 160 : 110;   // traffic caught in the blast
+  const CUT_R = ben ? 130 : 78;       // Eye cable sever radius
   removeBody(b, { silent: true });
 
-  LB.flash = Math.min(LB.flash + 0.9, 1);
-  LB.shake = Math.min(LB.shake + 30, 55);
+  LB.flash = Math.min(LB.flash + (ben ? 1.0 : 0.9), 1);
+  LB.shake = Math.min(LB.shake + (ben ? 48 : 30), 55);
   LB.events.explosions++;
   LB.events.shakes++;
   LB.events.tntExploded++;
-  LB.audio.boom(1.15);
-  P.ring(x, y, 15, 6);
-  P.ring(x, y, 9, 3, 'rgba(255,190,110,0.8)');
-  P.embers(x, y, 52);
-  P.sparks(x, y, 40, SPR.glow.gold, 10);
-  P.smoke(x, y, 20, true);
-  for (let k = 0; k < 8; k++) {
-    P.flame(x + rand(-26, 26), y + rand(-26, 26), rand(-2, 2), rand(-3.4, -0.6));
+  if (ben) {
+    LB.audio.tripleBoom();
+    P.ring(x, y, 24, 9);
+    P.ring(x, y, 16, 6, 'rgba(255,190,110,0.9)');
+    P.ring(x, y, 10, 4, 'rgba(255,120,70,0.8)');
+    P.embers(x, y, 110);
+    P.sparks(x, y, 84, SPR.glow.gold, 14);
+    P.smoke(x, y, 40, true);
+    for (let k = 0; k < 18; k++) {
+      P.flame(x + rand(-48, 48), y + rand(-48, 48), rand(-3, 3), rand(-5, -1));
+    }
+  } else {
+    LB.audio.boom(1.15);
+    P.ring(x, y, 15, 6);
+    P.ring(x, y, 9, 3, 'rgba(255,190,110,0.8)');
+    P.embers(x, y, 52);
+    P.sparks(x, y, 40, SPR.glow.gold, 10);
+    P.smoke(x, y, 20, true);
+    for (let k = 0; k < 8; k++) {
+      P.flame(x + rand(-26, 26), y + rand(-26, 26), rand(-2, 2), rand(-3.4, -0.6));
+    }
   }
 
   // vaporize core + radial impulse (other TNT blocks are flung, never vaporized:
-  // every fuse runs its own full 3 s schedule — no chain detonation)
+  // every fuse runs its own full schedule — no chain detonation)
   for (let k = 0; k < LB.bodies.length; k++) {
     const o = LB.bodies[k];
     if (o.isStatic || !o.plugin.lb) continue;
@@ -1568,18 +1589,18 @@ function explodeTNT(t) {
     const d = dist(o.position.x, o.position.y, x, y);
     if (olb.set === 'vehicle') {
       // TNT rule: traffic caught in the blast explodes immediately
-      if (d < 110) { const veh = vehicleByBody(o); if (veh) explodeVehicle(veh); }
+      if (d < VEH_CORE) { const veh = vehicleByBody(o); if (veh) explodeVehicle(veh); }
       continue;
     }
-    if (d < 74 && olb.set !== 'meteor' && olb.set !== 'tnt') {
+    if (d < CORE && olb.set !== 'meteor' && olb.set !== 'tnt') {
       removeBody(o, {});
-    } else if (d < 360) {
-      const f = 1 - d / 360;
+    } else if (d < PUSH) {
+      const f = 1 - d / PUSH;
       const ux = (o.position.x - x) / (d || 1), uy = (o.position.y - y) / (d || 1);
       M.Sleeping.set(o, false);
       M.Body.setVelocity(o, {
-        x: o.velocity.x + ux * f * 30,
-        y: o.velocity.y + uy * f * 30 - f * 10
+        x: o.velocity.x + ux * f * FLING,
+        y: o.velocity.y + uy * f * FLING - f * LIFT
       });
       M.Body.setAngularVelocity(o, o.angularVelocity + (Math.random() - 0.5) * 0.3 * f);
     }
@@ -1591,7 +1612,7 @@ function explodeTNT(t) {
     const ay = c.bodyA ? c.bodyA.position.y + c.pointA.y : c.pointA.y;
     const bx = c.bodyB ? c.bodyB.position.x + c.pointB.x : c.pointB.x;
     const by = c.bodyB ? c.bodyB.position.y + c.pointB.y : c.pointB.y;
-    if (dist((ax + bx) / 2, (ay + by) / 2, x, y) < 78) {
+    if (dist((ax + bx) / 2, (ay + by) / 2, x, y) < CUT_R) {
       M.Composite.remove(world, c);
       LB.constraints.splice(ci, 1);
       LB.events.brokenConstraints++;
@@ -1600,7 +1621,7 @@ function explodeTNT(t) {
   }
   // scorch decal
   if (y > GROUND_Y - 110) {
-    LB.decals.push({ x: x, y: Math.min(y, GROUND_Y + 8), size: rand(80, 120), alpha: 0.55 });
+    LB.decals.push({ x: x, y: Math.min(y, GROUND_Y + 8), size: ben ? rand(140, 190) : rand(80, 120), alpha: 0.55 });
     if (LB.decals.length > 14) LB.decals.shift();
   }
 }
@@ -2911,6 +2932,7 @@ function selectWeapon(w) {
 const pickerEl = document.getElementById('picker');
 function openPicker() {
   if (LB.phase !== 'play' || LB.paused) return false;
+  selectWeapon(LB.weapon); // sync active-card highlight even before the first selection
   LB.paused = true;
   if (pickerEl) pickerEl.classList.remove('hidden');
   if (LB.audio.ctx && LB.audio.ctx.state === 'running') {
@@ -2968,6 +2990,7 @@ document.getElementById('curWeapon').addEventListener('pointerdown', function (e
 window.addEventListener('keydown', function (e) {
   if (LB.paused) {
     if (e.key === 'Escape' || e.key === 'Esc') closePicker();
+    else if (e.key === 'm' || e.key === 'M') toggleMute(); // M works with the picker open too
     return;
   }
   const k = e.key;
@@ -2987,6 +3010,7 @@ window.addEventListener('keydown', function (e) {
   else if (k === 'm' || k === 'M') toggleMute();
 });
 window.addEventListener('wheel', function (e) {
+  if (LB.paused) return; // picker open: the wheel must not change weapons behind it
   const idx = WEAPONS.indexOf(LB.weapon);
   const next = (idx + (e.deltaY > 0 ? 1 : WEAPONS.length - 1)) % WEAPONS.length;
   selectWeapon(WEAPONS[next]);
