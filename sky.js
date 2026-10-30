@@ -73,12 +73,13 @@ window.LBSky = (function () {
     if (tt < 0.5) {
       sun.prog = clamp01(tt / 0.5);
       sun.x = -140 + sun.prog * (D.W + 280);
-      sun.y = (D.HORIZON_Y + 30) - Math.sin(sun.prog * Math.PI) * (D.HORIZON_Y - 40);
+      // arc peak stays at y≈200: above the tower tip, clear of the HUD buttons
+      sun.y = (D.HORIZON_Y + 30) - Math.sin(sun.prog * Math.PI) * (D.HORIZON_Y - 170);
       sun.up = sun.y < D.HORIZON_Y + 40;
     } else {
       moon.prog = clamp01((tt - 0.5) / 0.5);
       moon.x = -140 + moon.prog * (D.W + 280);
-      moon.y = (D.HORIZON_Y + 30) - Math.sin(moon.prog * Math.PI) * (D.HORIZON_Y - 40);
+      moon.y = (D.HORIZON_Y + 30) - Math.sin(moon.prog * Math.PI) * (D.HORIZON_Y - 170);
       moon.up = moon.y < D.HORIZON_Y + 40;
     }
     var name = u < 0.5 ? k0.name : k1.name;
@@ -232,7 +233,10 @@ window.LBSky = (function () {
       }
     },
 
-    /* screen space ambience: world tint + sunshine lift (before flash/vignette) */
+    /* screen space ambience: world tint + sunshine lift (before flash/vignette).
+       Perf: the dark/warm/dim overlays are pre-mixed into ONE full-screen fill
+       (SwiftShader full-screen passes are not free); only the additive daylight
+       lift is a second pass. */
     drawTint: function () {
       var ctx = D.ctx;
       var w = D.LB.weather;
@@ -244,17 +248,25 @@ window.LBSky = (function () {
         ctx.fillRect(0, 0, D.cw(), D.ch());
         ctx.globalCompositeOperation = 'source-over';
       }
-      if (S.night > 0.01) {
-        ctx.fillStyle = 'rgba(8,12,40,' + (0.32 * S.night).toFixed(3) + ')';
-        ctx.fillRect(0, 0, D.cw(), D.ch());
-      }
-      if (S.warm > 0.05 && S.night < 0.8) {
-        ctx.fillStyle = 'rgba(255,140,60,' + (0.09 * S.warm * (1 - S.night)).toFixed(3) + ')';
-        ctx.fillRect(0, 0, D.cw(), D.ch());
-      }
-      if (w && w.cur.dim > 0.01) {
-        ctx.fillStyle = 'rgba(10,14,32,' + w.cur.dim.toFixed(3) + ')';
-        ctx.fillRect(0, 0, D.cw(), D.ch());
+      // pre-mix night (8,12,40) + sunset warm (255,140,60) + weather dim (10,14,32)
+      var layers = [];
+      if (S.night > 0.01) layers.push({ c: [8, 12, 40], a: 0.32 * S.night });
+      if (S.warm > 0.05 && S.night < 0.8) layers.push({ c: [255, 140, 60], a: 0.09 * S.warm * (1 - S.night) });
+      if (w && w.cur.dim > 0.01) layers.push({ c: [10, 14, 32], a: w.cur.dim });
+      if (layers.length) {
+        // exact "over" compositing of the stack, bottom-up, into one fill
+        var r = 0, g = 0, b = 0, aOut = 0;
+        for (var i = layers.length - 1; i >= 0; i--) {
+          var L = layers[i];
+          aOut = L.a + aOut * (1 - L.a);
+          r = L.c[0] * L.a + r * (1 - L.a);
+          g = L.c[1] * L.a + g * (1 - L.a);
+          b = L.c[2] * L.a + b * (1 - L.a);
+        }
+        if (aOut > 0.004) {
+          ctx.fillStyle = 'rgba(' + Math.round(r) + ',' + Math.round(g) + ',' + Math.round(b) + ',' + aOut.toFixed(3) + ')';
+          ctx.fillRect(0, 0, D.cw(), D.ch());
+        }
       }
     },
 

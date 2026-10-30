@@ -34,8 +34,8 @@ window.LBPlane = (function () {
     var dir = Math.random() < 0.5 ? 1 : -1;
     var alt = rand(80, 165);                       // above tower tip (~y 276) + Eye top (~y 185)
     var x = dir > 0 ? -rand(80, 200) : D.W + rand(80, 200);
-    var def = { w: 44, h: 13 };
-    var b = D.M.Bodies.rectangle(x, alt, def.w - 6, def.h, {
+    var def = { w: 58, h: 17 };
+    var b = D.M.Bodies.rectangle(x, alt, def.w - 8, def.h - 3, {
       friction: 0.2, frictionStatic: 0.4, restitution: 0.25, density: 0.002,
       frictionAir: 0.006, sleepThreshold: Infinity, label: 'plane'
     });
@@ -172,7 +172,8 @@ window.LBPlane = (function () {
       ctx.globalAlpha = 1;
     }
     ctx.scale(dir, 1);
-    // contrail stub + fuselage
+    ctx.scale(1.35, 1.35);      // v4: bigger sprite so it reads as a plane even on phones
+    // fuselage
     ctx.fillStyle = lb.color;
     ctx.beginPath();
     ctx.moveTo(-20, 0);
@@ -183,7 +184,12 @@ window.LBPlane = (function () {
     ctx.lineTo(-14, 5);
     ctx.quadraticCurveTo(-20, 5, -20, 0);
     ctx.fill();
-    // tail fin
+    // light rim so the shape reads against the night sky too
+    var night = D.LB.sky ? D.LB.sky.night : 0;
+    ctx.strokeStyle = 'rgba(255,255,255,' + (0.28 + 0.34 * night).toFixed(3) + ')';
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+    // tail fin (white band keeps it readable at night)
     ctx.fillStyle = lb.color;
     ctx.beginPath();
     ctx.moveTo(-19, -2);
@@ -192,24 +198,33 @@ window.LBPlane = (function () {
     ctx.lineTo(-11, -2);
     ctx.closePath();
     ctx.fill();
-    // wing (low, across the fuselage)
-    ctx.fillStyle = 'rgba(20,24,40,0.85)';
+    ctx.fillStyle = '#f2f4fa';
+    ctx.fillRect(-14.6, -10.5, 4, 3.4);
+    // wing (low, across the fuselage) + light top edge
+    ctx.fillStyle = '#39415e';
     ctx.fillRect(-6, 0, 14, 3.4);
-    // cockpit + windows
-    ctx.fillStyle = '#9fc4e8';
+    ctx.fillStyle = 'rgba(230,238,252,' + (0.5 + 0.4 * night).toFixed(3) + ')';
+    ctx.fillRect(-6, 0, 14, 1);
+    // cockpit + cabin windows (bright, readable day and night)
+    ctx.fillStyle = '#b9d9f7';
     ctx.fillRect(12, -3.6, 5, 3);
-    ctx.fillStyle = 'rgba(30,36,60,0.8)';
-    for (var i = 0; i < 4; i++) ctx.fillRect(-6 + i * 4.4, -2.6, 2.4, 2.4);
+    for (var i = 0; i < 4; i++) ctx.fillRect(-6 + i * 4.4, -2.8, 2.4, 2.6);
     // propeller: spinning blur arc
     propSpin += 0.9;
-    ctx.strokeStyle = 'rgba(200,210,230,0.75)';
-    ctx.lineWidth = 2;
+    ctx.strokeStyle = 'rgba(210,220,240,' + (0.6 + 0.3 * night).toFixed(3) + ')';
+    ctx.lineWidth = 2.2;
     ctx.beginPath();
-    ctx.ellipse(22, 0, 2.2, 9 * Math.abs(Math.cos(propSpin)), 0, 0, Math.PI * 2);
+    ctx.ellipse(22, 0, 2.4, 9.5 * Math.abs(Math.cos(propSpin)), 0, 0, Math.PI * 2);
     ctx.stroke();
     ctx.fillStyle = '#39405a';
     ctx.beginPath(); ctx.arc(22, 0, 1.8, 0, Math.PI * 2); ctx.fill();
     ctx.restore();
+    // soft glow halo at night so the little plane pops against the dark
+    if (night > 0.2) {
+      ctx.globalAlpha = 0.16 * night;
+      ctx.drawImage(D.SPR.glow.white, b.position.x - 34, b.position.y - 34, 68, 68);
+      ctx.globalAlpha = 1;
+    }
     // blinking nav light (always cute; brighter at night via additive pass below)
     var blink = Math.sin(time * 6) > 0.4;
     if (blink) {
@@ -217,6 +232,11 @@ window.LBPlane = (function () {
       ctx.beginPath();
       ctx.arc(b.position.x - dir * 13, b.position.y - 12, 1.8, 0, Math.PI * 2);
       ctx.fill();
+      if (night > 0.2) {
+        ctx.globalAlpha = 0.5 * night;
+        ctx.drawImage(D.SPR.glow.red, b.position.x - dir * 13 - 6, b.position.y - 18, 12, 12);
+        ctx.globalAlpha = 1;
+      }
     }
   }
 
