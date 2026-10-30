@@ -74,7 +74,8 @@
   #muteBtn { right: 14px; }
   #bellBtn { right: 82px; font-size: 24px; }
   #bellBtn:active { transform: translateY(2px); }
-  /* v3 wave 2: 🔄 NEW GAME — only visible in KEEP PLAYING mode (after a win) */
+  /* v3.2: 🔄 NEW GAME — visible from PLAY onward (normal play, mid-destruction,
+     finale fireworks, keep-playing); hidden only on the title screen */
   #newGameBtn {
     pointer-events: auto; cursor: pointer;
     position: absolute; top: 12px; left: 14px;
@@ -200,17 +201,6 @@
     <h1><span class="t1">LONDON</span><br><span class="t2">BOOM! 💥</span></h1>
     <p>Big Ben and the London Eye are standing tall.<br>☄️ 🕳️ 🌪️ 🧨 💣 🧱 🌟 ☢️ 🌊 ⚡ 🪨 🌀 🔥<br><b>13 weapons!</b> Tap the big button to pick one. Break everything! 🇬🇧</p>
     <button id="playBtn" class="bigbtn" type="button">▶&nbsp;PLAY</button>
-  </div>
-</div>
-
-<div id="win" class="overlay hidden">
-  <div class="panel">
-    <h1>🎉 YOU DID IT! 🎉</h1>
-    <p>London is officially BOOMED.<br>Fireworks for the champion destroyer! 🏆</p>
-    <div class="btnrow">
-      <button id="keepBtn" class="bigbtn blue" type="button">🎆&nbsp;KEEP&nbsp;PLAYING</button>
-      <button id="againBtn" class="bigbtn" type="button">🔁&nbsp;PLAY&nbsp;AGAIN</button>
-    </div>
   </div>
 </div>
 

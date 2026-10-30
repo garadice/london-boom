@@ -3308,44 +3308,44 @@ function stepFinale(dt) {
   const F = LB.finale;
   if (!F) return;
   F.t += dts;
-  if (F.t > 2.4 && !F.shown) {
-    F.shown = true;
-    const winEl = document.getElementById('win');
-    if (winEl) winEl.classList.remove('hidden');
-  }
   if (F.t > F.next && F.rockets < 34) {
     F.next = F.t + rand(0.14, 0.34);
     launchRocket();
     F.rockets++;
   }
+  // v3.2 win flow: no overlay — when the finale show is over (all 34 rockets
+  // launched and burst), the game glides into keep-playing mode by itself
+  if (F.rockets >= 34 && LB.rockets.length === 0 && F.t > 8) keepPlaying();
 }
 
 function startFinale() {
   if (LB.phase === 'finale') return;
   LB.phase = 'finale';
-  LB.finale = { t: 0, next: 0.2, shown: false, rockets: 0 };
+  LB.finale = { t: 0, next: 0.2, rockets: 0 };
   LB.audio.fanfare();
   LB.audio.crackle(24);
   syncNewGameBtn();
 }
 
-/* F3: KEEP PLAYING — back to the broken world, traffic + fireworks keep going */
+/* v3.2: continue in the ruins — traffic + fireworks keep going. No button
+   anymore: this runs by itself at the end of the finale show (and stays
+   callable via __TEST__.keepPlaying() for automated tests). */
 function keepPlaying() {
-  if (LB.phase !== 'finale') return;
+  if (LB.phase === 'title') return;
+  if (LB.phase !== 'finale' && !LB.continueMode) return;
   LB.continueMode = true;
   LB.finale = null;
   LB.phase = 'play';
   LB.fireworksTimer = 1.2;
-  const winEl = document.getElementById('win');
-  if (winEl) winEl.classList.add('hidden');
   syncNewGameBtn();
 }
 
-/* v3 wave 2: 🔄 NEW GAME — full fresh world from inside KEEP PLAYING mode.
-   Identical end-state to PLAY AGAIN: resetWorld() rebuilds everything,
+/* v3.2: 🔄 NEW GAME — full fresh world from ANY moment after PLAY: normal
+   play, mid-destruction, during the finale fireworks, or in keep-playing.
+   Identical end-state in every case: resetWorld() rebuilds everything,
    re-arms the finale, zeroes every counter and clears continueMode. */
 function newGame() {
-  if (!LB.continueMode) return false;
+  if (LB.phase === 'title') return false;
   LB.audio.init(); LB.audio.resume();
   LB.audio.click();
   resetWorld();
@@ -3355,9 +3355,10 @@ function newGame() {
 function syncNewGameBtn() {
   const el = document.getElementById('newGameBtn');
   if (!el) return;
-  // visible ONLY while keep-playing is live: hidden on title, in normal play,
-  // during the finale, while the weapon picker is open, and after any reset
-  const show = LB.continueMode && LB.phase === 'play' && !LB.paused;
+  // v3.2: visible ALWAYS except the title screen — normal play, mid-destruction,
+  // the finale fireworks, keep-playing mode (behind the picker overlay it is
+  // simply not clickable, which is fine: the picker owns the screen while open)
+  const show = LB.phase !== 'title';
   el.classList.toggle('hidden', !show);
 }
 
@@ -3421,8 +3422,6 @@ function resetWorld() {
   LB.events.tntPlaced = 0; LB.events.tntExploded = 0;
   LB.events.vehiclesExploded = 0; LB.events.vehiclesFlung = 0; LB.events.brokenBell = 0;
   P.clear();
-  const winEl = document.getElementById('win');
-  if (winEl) winEl.classList.add('hidden');
   addGround();
   buildTower();
   buildAnnex();
@@ -3434,7 +3433,7 @@ function resetWorld() {
   LB.bodies = M.Composite.allBodies(world);
   LB.events.resets++;
   LB.phase = 'play';
-  syncNewGameBtn();                        // v3 wave 2: NEW GAME button only lives in continueMode
+  syncNewGameBtn();                        // v3.2: fresh world → button stays visible
 }
 
 function warmup(n) {
@@ -3604,7 +3603,7 @@ window.addEventListener('keydown', function (e) {
   else if (k === 'v' || k === 'V') selectWeapon('vortex');
   else if (k === 'f' || k === 'F') selectWeapon('fire');
   else if (k === 'm' || k === 'M') toggleMute();
-  else if (k === 'n' || k === 'N') newGame(); // v3 wave 2: fresh game from keep-playing
+  else if (k === 'n' || k === 'N') newGame(); // v3.2: fresh game any time after PLAY
 });
 window.addEventListener('wheel', function (e) {
   if (LB.paused) return; // picker open: the wheel must not change weapons behind it
@@ -3627,14 +3626,7 @@ document.getElementById('playBtn').addEventListener('click', function () {
   LB.audio.init(); LB.audio.resume();
   document.getElementById('title').classList.add('hidden');
   LB.phase = 'play';
-});
-document.getElementById('againBtn').addEventListener('click', function () {
-  LB.audio.init(); LB.audio.resume();
-  resetWorld();
-});
-document.getElementById('keepBtn').addEventListener('click', function () {
-  LB.audio.init(); LB.audio.resume();
-  keepPlaying();
+  syncNewGameBtn();                        // v3.2: 🔄 NEW GAME appears with the first PLAY
 });
 document.getElementById('bellBtn').addEventListener('pointerdown', function (e) {
   e.stopPropagation();

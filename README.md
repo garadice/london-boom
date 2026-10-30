@@ -45,8 +45,10 @@ while you choose. No reading needed: big emoji, big buttons, instant action.
 - **The London Eye** — 157 physics parts, quietly turning, hanging pods.
 - **Traffic** — red double-deckers, black cabs and cars. Blast them, fling
   them, sweep them away, roll over them.
-- **Win** (wreck tower + Eye) → fireworks → **KEEP PLAYING** in the ruins
-  (traffic + fireworks continue, 🔄 **NEW GAME** starts fresh) or **PLAY AGAIN**.
+- **Win** (wreck tower + Eye) → fireworks + fanfare, then the game keeps
+  going in the ruins **by itself** (traffic + fireworks continue — no win
+  screen, no pause). 🔄 **NEW GAME** (top left, there from the start) or `N`
+  restarts fresh at any moment.
 
 ## Controls
 
@@ -56,7 +58,7 @@ while you choose. No reading needed: big emoji, big buttons, instant action.
 | Choose weapon | the big top button, keys `1`–`9` `0` `S` `V` `F`, or mouse wheel |
 | Ring the bells | 🔔 (top right) |
 | Mute | 🔊 (top right) or `M` |
-| New game after the win | 🔄 button (top left) or `N` |
+| New game | 🔄 button (top left) or `N` — works any time after pressing PLAY |
 
 ## Run it
 

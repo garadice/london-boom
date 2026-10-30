@@ -6,7 +6,7 @@ Dev-facing detail that does not belong in the public README. Protocol
 ## Project layout
 
 ```
-index.html            minimal shell: canvas, HUD, title/win overlays (all CSS inline)
+index.html            minimal shell: canvas, HUD, title overlay (all CSS inline)
 game.js               the whole game (custom Canvas2D renderer, fixed-timestep loop)
 sw.js                 service worker: cache-first local shell (offline + installable)
 manifest.json         PWA manifest (name, icons, standalone display, dusk colors)
@@ -40,7 +40,7 @@ __TEST__.vehicles()          // { counts: { onScreen, exploded, flung }, list: [
 __TEST__.clock()             // { h, m, s, ms } — real local time shown on the dials
 __TEST__.bell()              // { scheduled, played, strikes, active, brokenPlayed, brokenEvents }
 __TEST__.playTwelve()        // fires the full 12:00 sequence programmatically
-__TEST__.keepPlaying()       // same as the KEEP PLAYING button
+__TEST__.keepPlaying()       // jumps straight to keep-playing (auto-runs at finale end; no button)
 __TEST__.weaponFired         // live counters for all 13 weapons
 __TEST__.events              // { explosions, consumed, fireworks, vehiclesExploded, vehiclesFlung, brokenBell, ... }
 __TEST__.tnt()               // live TNT blocks (entries carry a ben flag for TNT BEN)
@@ -50,7 +50,7 @@ __TEST__.openPicker() / closePicker()
 __TEST__.newGame()           // same as the 🔄 NEW GAME button
 __TEST__.screenToWorld(cx, cy)
 __TEST__.destroyAll()        // test shortcut: wreck the landmarks
-__TEST__.reset()             // full world reset (same as PLAY AGAIN)
+__TEST__.reset()             // full world reset (the old PLAY AGAIN semantics)
 __TEST__.state()             // { phase, fps, particles, vehiclesOnScreen, continueMode, weapon, pickerOpen, ... }
 __TEST__.step(n)             // headless helper: pump n exact fixed physics steps
 __TEST__.renderFrame()       // headless helper: paint one frame on demand
