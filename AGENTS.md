@@ -87,10 +87,15 @@ Repo: https://github.com/garadice/london-boom (public, MIT, © 2026 Martin Mogis
 3. Main merges to `main`, fixes trivial docs nits, deploys, verifies live
    (page 200 + served game.js contains new markers + manifest/sw/icons 200),
    reports with evidence receipt, pushes to GitHub.
-4. Deploy is MANUAL by design (`vercel deploy --prod` from repo dir) — it stays
+4. **README is the public face — actualize it with EVERY push.** Before any
+   push to GitHub, README.md must match the shipped user-visible state
+   (weapons, landmarks, controls, screenshots). Keep it short and
+   user-friendly; dev detail lives in `docs/DEV.md`, process in AGENTS.md.
+   A push that ships a code change without its README update is not done.
+5. Deploy is MANUAL by design (`vercel deploy --prod` from repo dir) — it stays
    behind the verifier gate. (Vercel↔GitHub auto-deploy not connected; to add:
-  GitHub → Settings → Applications → Vercel → repo access for `london-boom`.)
-5. Update this file's "Current state" after every shipped change.
+   GitHub → Settings → Applications → Vercel → repo access for `london-boom`.)
+6. Update this file's "Current state" after every shipped change.
 
 ## Session continuity
 - This file is the source of truth. Hermes skill `project-londonboom` points here.
