@@ -272,6 +272,7 @@ window.LBPlane = (function () {
     hit: hit,
     impact: impact,
     spawn: spawn,
+    draw: draw,
     reset: function () {
       crashes.length = 0;
       if (plane) despawn();
@@ -285,7 +286,9 @@ window.LBPlane = (function () {
         planeCrashes: D.LB.events.planeCrashes,
         nextSpawnIn: plane ? null : Math.round(nextSpawn * 10) / 10,
         x: plane ? Math.round(plane.body.position.x) : null,
-        y: plane ? Math.round(plane.body.position.y) : null
+        y: plane ? Math.round(plane.body.position.y) : null,
+        dir: plane ? plane.body.plugin.lb.dir : null,
+        speed: plane ? Math.round(plane.body.plugin.lb.speed * 100) / 100 : null
       };
     },
     forceSpawn: function () {

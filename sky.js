@@ -173,9 +173,9 @@ window.LBSky = (function () {
         var sx = S.sun.x, sy = S.sun.y;
         var near = 1 - clamp01(sy / (D.HORIZON_Y * 0.9));   // bigger/warmer when low
         ctx.globalAlpha = 0.85;
-        ctx.drawImage(SPR.glow.gold, sx - 130, sy - 130, 260, 260);
+        ctx.drawImage(D.SPR.glow.gold, sx - 130, sy - 130, 260, 260);
         ctx.globalAlpha = 0.35;
-        ctx.drawImage(SPR.glow.orange, sx - 190, sy - 190, 380, 380);
+        ctx.drawImage(D.SPR.glow.orange, sx - 190, sy - 190, 380, 380);
         ctx.globalAlpha = 1;
         ctx.fillStyle = near > 0.6 ? '#fff0c0' : '#fff8e0';
         ctx.beginPath(); ctx.arc(sx, sy, 30 + near * 8, 0, Math.PI * 2); ctx.fill();
@@ -183,9 +183,9 @@ window.LBSky = (function () {
       if (S.moon.up) {
         var mx = S.moon.x, my = S.moon.y;
         ctx.globalAlpha = 0.9;
-        ctx.drawImage(SPR.glow.white, mx - 110, my - 110, 220, 220);
+        ctx.drawImage(D.SPR.glow.white, mx - 110, my - 110, 220, 220);
         ctx.globalAlpha = 0.25;
-        ctx.drawImage(SPR.glow.gold, mx - 150, my - 150, 300, 300);
+        ctx.drawImage(D.SPR.glow.gold, mx - 150, my - 150, 300, 300);
         ctx.globalAlpha = 1;
         ctx.fillStyle = '#e9edf5';
         ctx.beginPath(); ctx.arc(mx, my, 33, 0, Math.PI * 2); ctx.fill();
@@ -275,18 +275,18 @@ window.LBSky = (function () {
           ctx.globalAlpha = 0.42 * a;
           var w = lb.w || 10.65;
           if (standing) {
-            ctx.drawImage(SPR.glow.gold, b.position.x - w * 0.2 - 5, b.position.y - 5, 10, 10);
-            ctx.drawImage(SPR.glow.gold, b.position.x + w * 0.2 - 5, b.position.y - 5, 10, 10);
+            ctx.drawImage(D.SPR.glow.gold, b.position.x - w * 0.2 - 5, b.position.y - 5, 10, 10);
+            ctx.drawImage(D.SPR.glow.gold, b.position.x + w * 0.2 - 5, b.position.y - 5, 10, 10);
           } else {
-            ctx.drawImage(SPR.glow.gold, b.position.x - 5, b.position.y - 5, 10, 10);
+            ctx.drawImage(D.SPR.glow.gold, b.position.x - 5, b.position.y - 5, 10, 10);
           }
         } else if (lb.kind === 'annexWin') {
           ctx.globalAlpha = 0.5 * a;
-          ctx.drawImage(SPR.glow.gold, b.position.x - 7, b.position.y - 6, 14, 12);
+          ctx.drawImage(D.SPR.glow.gold, b.position.x - 7, b.position.y - 6, 14, 12);
         } else if (lb.kind === 'louvre') {
           // the belfry glows from inside — the bells are up there
           ctx.globalAlpha = 0.22 * a;
-          ctx.drawImage(SPR.glow.gold, b.position.x - 8, b.position.y - 8, 16, 16);
+          ctx.drawImage(D.SPR.glow.gold, b.position.x - 8, b.position.y - 8, 16, 16);
         }
       }
       ctx.globalAlpha = 1;
