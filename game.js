@@ -583,6 +583,16 @@ P.update = function (dt) {
         p.vy += p.grav; p.rot += p.vr;
         if (p.y > WATER_Y + 2) { p.on = false; }
         break;
+      case 'wheel': // v4: popped vehicle wheel — bounces, then rolls to a stop
+        p.vy += p.grav; p.rot += p.vr;
+        if (p.y > WATER_Y + 2) { p.on = false; break; }
+        if (p.y > GROUND_Y - p.size / 2 && p.vy > 0) {
+          p.y = GROUND_Y - p.size / 2;
+          p.vy = Math.abs(p.vy) > 1.6 ? -p.vy * 0.45 : 0;
+          p.vx *= 0.82;
+        }
+        if (p.vy === 0) { p.vx *= 0.95; p.rot = p.vx * 0.09; }
+        break;
       case 'flame':
         p.size *= 0.965;
         p.vx *= p.drag; p.vy = (p.vy - 0.06) * p.drag;
@@ -616,6 +626,14 @@ P.render = function (ctx, pass) {
         ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.rot);
         ctx.fillStyle = p.col;
         ctx.fillRect(-p.size / 2, -p.size / 2, p.size, p.size * 0.75);
+        ctx.restore();
+      } else if (p.type === 'wheel') { // v4: a popped wheel, bouncing away
+        ctx.globalAlpha = Math.min(1, k * 2.5);
+        ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.rot);
+        ctx.fillStyle = '#0c0c12';
+        ctx.beginPath(); ctx.arc(0, 0, p.size, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#3a3f52';
+        ctx.beginPath(); ctx.arc(0, 0, p.size * 0.45, 0, Math.PI * 2); ctx.fill();
         ctx.restore();
       }
     } else {
@@ -676,7 +694,7 @@ LB.flash = 0;
 LB.phase = 'title';             // title | play | finale
 LB.weapon = 'meteor';
 LB.weaponFired = { meteor: 0, blackhole: 0, tornado: 0, tnt: 0, bomb: 0, tnt_ben: 0, nova: 0, nuke: 0, tsunami: 0, laser: 0, stone: 0, vortex: 0, fire: 0 };
-LB.events = { explosions: 0, consumed: 0, fireworks: 0, brokenConstraints: 0, shakes: 0, splashes: 0, destroyedAll: 0, resets: 0, tntPlaced: 0, tntExploded: 0, vehiclesExploded: 0, vehiclesFlung: 0, brokenBell: 0 };
+LB.events = { explosions: 0, consumed: 0, fireworks: 0, brokenConstraints: 0, shakes: 0, splashes: 0, destroyedAll: 0, resets: 0, tntPlaced: 0, tntExploded: 0, vehiclesExploded: 0, vehiclesFlung: 0, brokenBell: 0, planeCrashes: 0, lightningStrikes: 0 };
 LB.tower = { bodies: [], clockBodies: [], lanternBodies: [], topBodies: [], total: 0 };
 LB.annex = { bodies: [], total: 0 };   // v3 wave 2: Westminster wing (NOT part of the win math)
 LB.flag = null;                        // v3 wave 2: { body: mast pole } on the annex roof
@@ -1260,16 +1278,51 @@ function spawnVehicle() {
   return v;
 }
 
+/* v4 crash juice: a "kill" is now a staged sequence. explodeVehicle() starts
+   the wreck (tumble, wheels pop off, fire) and explodeVehicleFinal() is the
+   boom ~0.75-1.15 s later. Counters increment at wreck START so tests and
+   the win/kill math read them at the moment of death. Block-damage radii in
+   the final boom are byte-identical to the old instant explosion. */
 function explodeVehicle(v) {
   const b = v.body, lb = b.plugin.lb;
-  if (lb.removed || lb.state === 'dead') return;
+  if (lb.removed || lb.state === 'wrecked' || lb.state === 'dead') return;
+  LB.traffic.counts.exploded++;
+  LB.events.vehiclesExploded++;
+  lb.state = 'wrecked';
+  lb.wreckT = 0;
+  lb.wreckDur = rand(0.75, 1.15);
+  // the engine dies; the wreck rejoins full collisions so it can tumble + roll
+  b.collisionFilter.category = CAT_DEFAULT;
+  b.collisionFilter.mask = 0xFFFFFFFF;
+  M.Sleeping.set(b, false);
+  M.Body.setAngularVelocity(b, (Math.random() < 0.5 ? -1 : 1) * rand(0.25, 0.55));
+  M.Body.setVelocity(b, { x: b.velocity.x + rand(-3, 3), y: b.velocity.y - rand(2.5, 5.5) });
+  LB.audio.thunk();
+  P.sparks(b.position.x, b.position.y, 10, SPR.glow.gold, 6);
+  popWheels(v);
+}
+
+/* wheels pop off and bounce away: a tiny 'wheel' particle that rolls */
+function popWheels(v) {
+  const n = v.type === 'bus' ? 4 : 2;
+  const r = v.type === 'bus' ? 6.2 : 5;
+  for (let k = 0; k < n; k++) {
+    P.spawn('wheel', v.body.position.x + rand(-14, 14), v.body.position.y - 2, {
+      vx: rand(-5, 5), vy: rand(-9.5, -4), life: rand(1.8, 2.6),
+      size: rand(r * 0.8, r * 1.15), grav: 0.16, drag: 0.995, vr: rand(-0.6, 0.6)
+    });
+  }
+}
+
+/* the dying wreck's boom — same damage the old instant explosion dealt */
+function explodeVehicleFinal(v) {
+  const b = v.body, lb = b.plugin.lb;
+  if (lb.removed || lb.state !== 'wrecked') return;
   lb.state = 'dead';
   const x = b.position.x, y = b.position.y;
   const i = LB.traffic.vehicles.indexOf(v);
   if (i >= 0) LB.traffic.vehicles.splice(i, 1);
   LB.traffic.counts.onScreen = LB.traffic.vehicles.length;
-  LB.traffic.counts.exploded++;
-  LB.events.vehiclesExploded++;
   removeBody(b, { silent: true });
 
   LB.flash = Math.min(LB.flash + 0.3, 1);
@@ -1299,12 +1352,40 @@ function explodeVehicle(v) {
       M.Body.setVelocity(o, { x: o.velocity.x + ux * f * 13, y: o.velocity.y + uy * f * 13 - f * 5 });
     }
   }
-  // chain reaction: very close vehicles get flung too
+  // chain reaction: very close vehicles get wrecked too
   for (let k = LB.traffic.vehicles.length - 1; k >= 0; k--) {
     const other = LB.traffic.vehicles[k];
     if (dist(other.body.position.x, other.body.position.y, x, y) < 130) flingVehicle(other, x);
   }
   if (y > WATER_Y - 14) P.splash(x, WATER_Y, 8);
+}
+
+/* v4: the crashed plane's meteor-like local damage (called by plane.js
+   at the moment of impact — game.js owns the block-damage conventions) */
+function planeImpactDamage(x, y) {
+  for (let k = 0; k < LB.bodies.length; k++) {
+    const o = LB.bodies[k];
+    if (o.isStatic || !o.plugin.lb) continue;
+    const olb = o.plugin.lb;
+    if (olb.removed || olb.set === 'plane') continue;
+    const d = dist(o.position.x, o.position.y, x, y);
+    if (olb.set === 'vehicle') {
+      if (d < 90) { const veh = vehicleByBody(o); if (veh) explodeVehicle(veh); }
+      continue;
+    }
+    if (WEAPON_SETS[olb.set]) continue;
+    if (d < 55) {
+      removeBody(o, {});
+    } else if (d < 300) {
+      const f = 1 - d / 300;
+      const ux = (o.position.x - x) / (d || 1), uy = (o.position.y - y) / (d || 1);
+      M.Sleeping.set(o, false);
+      M.Body.setVelocity(o, { x: o.velocity.x + ux * f * 22, y: o.velocity.y + uy * f * 22 - f * 7.5 });
+      M.Body.setAngularVelocity(o, o.angularVelocity + (Math.random() - 0.5) * 0.25 * f);
+    }
+  }
+  LB.decals.push({ x: x, y: GROUND_Y + 8, size: rand(70, 100), alpha: 0.5 });
+  if (LB.decals.length > 14) LB.decals.shift();
 }
 
 function flingVehicle(v, fromX) {
@@ -1361,6 +1442,16 @@ function stepTraffic(dt) {
       if ((sp > 7 && grounded) || b.position.y > WATER_Y + 6) { explodeVehicle(v); continue; }
       lb.restT = (sp < 1.2 && grounded) ? (lb.restT || 0) + dts : 0;
       if (lb.restT > 2.2) explodeVehicle(v); // leaking wreck finally goes up
+    } else if (lb.state === 'wrecked') {
+      // v4: burning, tumbling death — then the staged boom
+      lb.wreckT += dts;
+      if (stepCounter % 2 === 0) {
+        P.flame(b.position.x + rand(-10, 10), b.position.y + rand(-4, 4), rand(-0.6, 0.6), rand(-2.2, -1));
+        P.spawn('smoke', b.position.x + rand(-8, 8), b.position.y - 4, {
+          vx: rand(-0.5, 0.5), vy: rand(-1.4, -0.6), life: rand(0.8, 1.6), size: rand(9, 15), grow: 10, a: 0.35
+        });
+      }
+      if (lb.wreckT >= lb.wreckDur || b.position.y > WATER_Y + 6) explodeVehicleFinal(v);
     }
   }
 }
@@ -1684,6 +1775,11 @@ function explodeMeteor(b) {
       if (d < 100) { const veh = vehicleByBody(o); if (veh) explodeVehicle(veh); }
       continue;
     }
+    if (olb.set === 'plane') {
+      // v4 METEOR rule: a plane in the blast goes down
+      if (d < 100) LBPlane.hit(o);
+      continue;
+    }
     if (d < 62 && olb.set !== 'meteor') {
       removeBody(o, {});
     } else if (d < 340) {
@@ -1857,6 +1953,11 @@ function radialBlast(x, y, o) {
     const d = dist(b.position.x, b.position.y, x, y);
     if (lb.set === 'vehicle') {
       if (d < o.vehCore) { const veh = vehicleByBody(b); if (veh) explodeVehicle(veh); }
+      continue;
+    }
+    if (lb.set === 'plane') {
+      // v4: any blast catches the plane -> it goes down
+      if (d < o.core) LBPlane.hit(b);
       continue;
     }
     if (d < o.core) {
@@ -2160,6 +2261,11 @@ function stepNukeWaves(dts) {
       M.Sleeping.set(vb, false);
       M.Body.setVelocity(vb, { x: ux * rand(11, 17), y: uy * rand(4, 8) - rand(9, 14) });
       M.Body.setAngularVelocity(vb, rand(-0.5, 0.5));
+    }
+    // 4b) v4: the plane is vaporized too (goes down as it is engulfed)
+    if (LBPlane.body()) {
+      const pb = LBPlane.body();
+      if (dist(pb.position.x, pb.position.y, w.x, w.y) < w.r) LBPlane.hit(pb);
     }
     // done: the front has crossed every corner of the world
     if (w.r > 2350) LB.nukeWaves.splice(i, 1);
@@ -2524,6 +2630,11 @@ function stepLasers(dts) {
         if (lb.laserDmg > 60) { const veh = vehicleByBody(o); if (veh) explodeVehicle(veh); }
         continue;
       }
+      if (lb.set === 'plane') {
+        // v4 LASER rule: the beam cuts the plane out of the sky
+        LBPlane.hit(o);
+        continue;
+      }
       lb.laserDmg = (lb.laserDmg || 0) + 95 * dts;
       // the beam shoves the cut lightly along its direction
       M.Body.setVelocity(o, { x: o.velocity.x + bm.dir * 0.35, y: o.velocity.y });
@@ -2863,6 +2974,11 @@ function stepWeapons(dt) {
         if (r < 130) { const veh = vehicleByBody(o); if (veh) flingVehicle(veh, h.x); }
         continue;
       }
+      if (o.plugin.lb.set === 'plane') {
+        // v4 BLACK HOLE rule: caught in the pull, the flight is over
+        if (r < 170) LBPlane.hit(o);
+        continue;
+      }
       const d = Math.max(r, 46);
       let acc = 90 / (d * d);
       if (acc > 0.008) acc = 0.008;
@@ -2911,13 +3027,20 @@ function stepWeapons(dt) {
       const o = LB.bodies[k];
       if (o.isStatic || !o.plugin.lb || o.plugin.lb.removed) continue;
       const dx = o.position.x - t.x;
-      const hgt = clamp(GROUND_Y - o.position.y, 0, 540);
+      const isPlane = o.plugin.lb.set === 'plane';
+      // the funnel's reach extends higher for the plane (v4: it can catch it)
+      const hgt = clamp(GROUND_Y - o.position.y, 0, isPlane ? 720 : 540);
       const R = 55 + hgt * 0.52;
       const ad = Math.abs(dx);
-      if (ad > R * 1.9 || o.position.y < GROUND_Y - 560) continue;
+      if (ad > R * 1.9 || o.position.y < GROUND_Y - (isPlane ? 780 : 560)) continue;
       if (o.plugin.lb.set === 'vehicle') {
         // TORNADO rule: traffic caught in the funnel is flung free (engine dies)
         if (ad < R * 0.95) { const veh = vehicleByBody(o); if (veh) flingVehicle(veh, t.x); }
+        continue;
+      }
+      if (o.plugin.lb.set === 'plane') {
+        // v4 TORNADO rule: the funnel reaches the sky — the plane goes down
+        if (ad < R) LBPlane.hit(o);
         continue;
       }
       const fall = 1 - ad / (R * 1.9);
@@ -3179,6 +3302,15 @@ M.Events.on(engine, 'collisionStart', function (ev) {
     const la = A.plugin.lb, lbb = B.plugin.lb;
     if ((la && la.set === 'meteor')) { explodeMeteor(A); continue; }
     if ((lbb && lbb.set === 'meteor')) { explodeMeteor(B); continue; }
+    // v4 PLANE: any hard contact ends the flight — flying: shot down;
+    // crashing: the impact detonation
+    const plLb = (la && la.set === 'plane') ? la : (lbb && lbb.set === 'plane' ? lbb : null);
+    if (plLb) {
+      const plBody = plLb === la ? A : B;
+      if (plLb.state === 'flying') LBPlane.hit(plBody);
+      else if (plLb.state === 'crashing') LBPlane.impact();
+      continue;
+    }
     // flung vehicles explode when they slam into anything hard
     const vLb = (la && la.set === 'vehicle') ? la : (lbb && lbb.set === 'vehicle' ? lbb : null);
     if (vLb && vLb.state === 'flung') {
@@ -3421,6 +3553,11 @@ function resetWorld() {
   LB.events.brokenConstraints = 0; LB.events.shakes = 0; LB.events.splashes = 0;
   LB.events.tntPlaced = 0; LB.events.tntExploded = 0;
   LB.events.vehiclesExploded = 0; LB.events.vehiclesFlung = 0; LB.events.brokenBell = 0;
+  LB.events.planeCrashes = 0; LB.events.lightningStrikes = 0;
+  LBPlane.reset();                       // v4: sky is cleared of planes + crash booms
+  // v4 NOTE: the day/night cycle and the weather are AMBIENT world state —
+  // they deliberately keep running across NEW GAME (spec: the cycle never resets;
+  // the kid keeps his storm). The HUD clock stays real local time either way.
   P.clear();
   addGround();
   buildTower();
@@ -3531,6 +3668,7 @@ function openPicker() {
   if (LB.audio.ctx && LB.audio.ctx.state === 'running') {
     LB.audio.ctx.suspend().catch(function () {});
   }
+  LBWeather.duck(true);   // v4: weather loops go silent while the world waits
   LB.audio.pop();
   syncNewGameBtn();
   return true;
@@ -3542,6 +3680,7 @@ function closePicker() {
   if (LB.audio.ctx && LB.audio.ctx.state === 'suspended') {
     LB.audio.ctx.resume().catch(function () {});
   }
+  LBWeather.duck(false);  // v4: weather fades back in
   LB.audio.click();
   syncNewGameBtn();
   return true;
@@ -3633,6 +3772,11 @@ document.getElementById('bellBtn').addEventListener('pointerdown', function (e) 
   LB.audio.init(); LB.audio.resume();
   LB.audio.playTwelve(); // the full 12:00: quarters + 12 strikes (mute-aware)
 });
+document.getElementById('weatherBtn').addEventListener('pointerdown', function (e) {
+  e.stopPropagation();
+  LB.audio.init(); LB.audio.resume();
+  LBWeather.cycle();      // v4: kid-first — one tap, next weather
+});
 document.getElementById('newGameBtn').addEventListener('pointerdown', function (e) {
   e.stopPropagation();
   newGame();
@@ -3641,14 +3785,7 @@ document.getElementById('newGameBtn').addEventListener('pointerdown', function (
 /* ============================================================
    SCENE PAINTING (background)
    ============================================================ */
-const stars = [];
-for (let i = 0; i < 150; i++) {
-  stars.push({ x: -1300 + R() * 4300, y: R() * 520, s: 0.5 + R() * 1.4, ph: R() * 10, sp: 0.5 + R() * 2 });
-}
-const clouds = [];
-for (let i = 0; i < 7; i++) {
-  clouds.push({ x: -1200 + R() * 4200, y: 50 + R() * 260, sp: 2 + R() * 6, sc: 0.7 + R() * 1.1, seed: R() * 10 });
-}
+// v4: stars + clouds live in sky.js now; the skyline stays here.
 // skyline buildings: polygon + windows
 const skyline = [];
 function bld(pts, winDensity, warm) {
@@ -3685,77 +3822,9 @@ bld([[1850, 768], [1850, 678], [1930, 640], [2010, 678], [2010, 768]], 0.24);
 bld([[2200, 768], [2200, 690], [2300, 660], [2400, 690], [2400, 768]], 0.2);
 bld([[2500, 768], [2500, 700], [2600, 672], [2700, 700], [2700, 768]], 0.2);
 
-function drawSky() {
-  const hy = HORIZON_Y * vs + offY;
-  const g = ctx.createLinearGradient(0, 0, 0, Math.max(hy + 70, 10));
-  g.addColorStop(0, '#05081f');
-  g.addColorStop(0.38, '#131a4a');
-  g.addColorStop(0.62, '#292a67');
-  g.addColorStop(0.8, '#5c3160');
-  g.addColorStop(0.91, '#a34a44');
-  g.addColorStop(1, '#e8874a');
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, cw, Math.max(hy + 70, ch));
-  ctx.fillStyle = '#05081f';
-  ctx.fillRect(0, hy + 60, cw, ch);
-  // warm sunset glow behind skyline (right of centre)
-  const rg = ctx.createRadialGradient(cw * 0.68, hy, 10, cw * 0.68, hy, cw * 0.55);
-  rg.addColorStop(0, 'rgba(255,150,70,0.30)');
-  rg.addColorStop(0.5, 'rgba(255,120,60,0.12)');
-  rg.addColorStop(1, 'rgba(255,120,60,0)');
-  ctx.fillStyle = rg;
-  ctx.fillRect(0, 0, cw, hy + 60);
-}
-
-function drawStars(t) {
-  ctx.fillStyle = '#fff';
-  for (let i = 0; i < stars.length; i++) {
-    const s = stars[i];
-    const tw = 0.4 + 0.6 * Math.abs(Math.sin(t * s.sp + s.ph));
-    ctx.globalAlpha = tw * 0.85 * (1 - s.y / 600);
-    ctx.fillRect(s.x, s.y, s.s, s.s);
-  }
-  ctx.globalAlpha = 1;
-}
-
-function drawMoon() {
-  const mx = 1290, my = 128;
-  ctx.globalAlpha = 0.9;
-  ctx.drawImage(SPR.glow.white, mx - 110, my - 110, 220, 220);
-  ctx.globalAlpha = 0.25;
-  ctx.drawImage(SPR.glow.gold, mx - 150, my - 150, 300, 300);
-  ctx.globalAlpha = 1;
-  ctx.fillStyle = '#e9edf5';
-  ctx.beginPath(); ctx.arc(mx, my, 33, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = 'rgba(180,190,210,0.5)';
-  ctx.beginPath(); ctx.arc(mx - 10, my - 8, 7, 0, Math.PI * 2); ctx.fill();
-  ctx.beginPath(); ctx.arc(mx + 9, my + 10, 5, 0, Math.PI * 2); ctx.fill();
-  ctx.beginPath(); ctx.arc(mx + 13, my - 12, 4, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = 'rgba(9,12,32,0.25)';
-  ctx.beginPath(); ctx.arc(mx - 14, my - 14, 32, 0, Math.PI * 2); ctx.fill();
-}
-
-function drawClouds(t) {
-  for (let i = 0; i < clouds.length; i++) {
-    const c = clouds[i];
-    const x = ((c.x + t * c.sp) % 4200) - 1300;
-    ctx.save();
-    ctx.translate(x, c.y + Math.sin(t * 0.1 + c.seed) * 6);
-    ctx.scale(c.sc, c.sc);
-    ctx.fillStyle = 'rgba(44,52,98,0.5)';
-    ctx.beginPath();
-    ctx.ellipse(0, 0, 90, 26, 0, 0, Math.PI * 2);
-    ctx.ellipse(-60, 8, 55, 18, 0, 0, Math.PI * 2);
-    ctx.ellipse(58, 6, 60, 20, 0, 0, Math.PI * 2);
-    ctx.ellipse(10, -14, 50, 18, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = 'rgba(255,150,90,0.10)';
-    ctx.beginPath();
-    ctx.ellipse(6, 14, 80, 10, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-  }
-}
+/* v4: the sky (gradient, stars, sun/moon, clouds) moved to sky.js —
+   LBSky owns the day/night cycle and draws these layers; game.js
+   only modulates its own painters by LB.sky.night below. */
 
 function drawSkyline() {
   ctx.fillStyle = '#0c1226';
@@ -3767,7 +3836,9 @@ function drawSkyline() {
     ctx.closePath();
     ctx.fill();
   }
-  ctx.globalAlpha = 0.8;
+  // lit windows: a dusk signature by night, almost invisible at noon
+  const night = LB.sky ? LB.sky.night : 0;
+  ctx.globalAlpha = 0.1 + 0.7 * night;
   for (let i = 0; i < skyline.length; i++) {
     const wins = skyline[i].wins;
     for (let k = 0; k < wins.length; k++) {
@@ -3807,9 +3878,12 @@ function drawGroundAndWaterBase() {
 }
 
 function gatherLightSources() {
-  const srcs = [
-    { x: 1290, col: 'rgba(190,205,255,', a: 0.4, w: 46 },
-  ];
+  const srcs = [];
+  // the moon (or sun by day) drags its own reflection across the Thames
+  const sky = LB.sky;
+  if (sky && sky.moon.up) srcs.push({ x: sky.moon.x, col: 'rgba(190,205,255,', a: 0.4 * sky.night + 0.08, w: 46 });
+  else if (sky && sky.sun.up) srcs.push({ x: sky.sun.x, col: 'rgba(255,210,140,', a: 0.25 * sky.light, w: 60 });
+  else srcs.push({ x: 1290, col: 'rgba(190,205,255,', a: 0.4, w: 46 });
   // clock glow
   let cx = 0, cy = 0, cn = 0;
   for (let i = 0; i < LB.tower.clockBodies.length; i++) {
@@ -4182,8 +4256,10 @@ function drawBodies() {
 
 function drawEyeLEDs() {
   const E = LB.eye;
+  // the Eye lights up for the night: pods + rim glow harder as darkness falls
+  const nk = LB.sky ? 0.45 + 0.55 * LB.sky.night : 1;
   ctx.globalCompositeOperation = 'lighter';
-  ctx.globalAlpha = 0.8 * E.led;
+  ctx.globalAlpha = 0.8 * E.led * nk;
   for (let i = 0; i < E.rim.length; i++) {
     const s = E.rim[i];
     if (s.plugin.lb.removed) continue;
@@ -4191,7 +4267,7 @@ function drawEyeLEDs() {
     const px = s.position.x + -sn * -7.5, py = s.position.y + c * -7.5;
     ctx.drawImage(SPR.glow.violet, px - 7, py - 7, 14, 14);
   }
-  ctx.globalAlpha = 0.55 * E.led;
+  ctx.globalAlpha = 0.55 * E.led * nk;
   for (let i = 0; i < E.pods.length; i++) {
     const p = E.pods[i];
     if (p.plugin.lb.removed) continue;
@@ -4859,6 +4935,9 @@ function stepWorld(dt) {
   LB.bodies = M.Composite.allBodies(world);
   stepGuards();
   stepTraffic(dt);
+  LBSky.step(dt);          // v4: ambient world clock (never reset by NEW GAME)
+  LBWeather.step(dt);      // v4: weather + its sounds (ducked by the picker)
+  LBPlane.step(dt);        // v4: the little plane (+ staged crash booms)
   P.update(dt / 1000);
   stepDecals(dt / 1000);
   stepFinale(dt);
@@ -4888,13 +4967,15 @@ function frame(now) {
 
 function render(t) {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  drawSky();
+  LBSky.drawSky();
   const shx = (Math.random() - 0.5) * LB.shake, shy = (Math.random() - 0.5) * LB.shake;
   ctx.setTransform(dpr * vs, 0, 0, dpr * vs, dpr * (offX + shx), dpr * (offY + shy));
-  drawStars(t);
-  drawMoon();
-  drawClouds(t);
+  LBSky.drawStars(t);
+  LBSky.drawSunMoon();
+  LBPlane.draw(t);       // the little plane crosses in front of the sun/moon, behind the clouds
+  LBSky.drawClouds(t);
   drawSkyline();
+  LBWeather.drawFarMist(t);   // mist eats the far skyline before the landmarks are drawn
   drawGroundAndWaterBase();
   drawRoad();
   drawVehicles(0);       // far lane: behind the landmarks
@@ -4902,6 +4983,7 @@ function render(t) {
   drawDecals();
   drawBodies();
   drawFlag(t);
+  LBSky.drawNightWindows();   // warm windows once the city stands (additive pass)
   drawVehicles(1);       // near lane + flying wrecks: in front
   drawTNTs();
   drawBombs();
@@ -4923,8 +5005,11 @@ function render(t) {
   ctx.globalCompositeOperation = 'source-over';
   drawEyeLEDs();
   drawClockFace(t);
+  LBWeather.drawRain(t);      // rain streaks + near fog: in front of the world
+  LBWeather.drawBolt();
   // screen-space UI
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  LBSky.drawTint();           // day/night/weather ambience over the whole scene
   if (LB.flash > 0.02) {
     ctx.fillStyle = 'rgba(255,245,230,' + Math.min(0.75, LB.flash * 0.75).toFixed(3) + ')';
     ctx.fillRect(0, 0, cw, ch);
@@ -4934,8 +5019,11 @@ function render(t) {
     vignette.addColorStop(0, 'rgba(0,0,0,0)');
     vignette.addColorStop(1, 'rgba(2,3,12,0.42)');
   }
+  // the dark frame breathes with the cycle: softer at noon, deeper at night
+  ctx.globalAlpha = LB.sky ? 0.55 + 0.45 * LB.sky.night : 1;
   ctx.fillStyle = vignette;
   ctx.fillRect(0, 0, cw, ch);
+  ctx.globalAlpha = 1;
   drawReticle(t);
 }
 
@@ -5073,6 +5161,8 @@ window.__TEST__ = {
       weapon: LB.weapon, pickerOpen: LB.paused,
       newGameBtn: !document.getElementById('newGameBtn').classList.contains('hidden'),
       vehiclesOnScreen: LB.traffic.vehicles.length,
+      planesOnScreen: LBPlane.body() ? 1 : 0,
+      weather: LBWeather.info().state,
       continueMode: LB.continueMode,
       time: Math.round(LB.time * 10) / 10, eyeSpinDeg: Math.round(LB.eye.spin * 10) / 10
     };
@@ -5081,6 +5171,25 @@ window.__TEST__ = {
   selectWeapon: function (w) { selectWeapon(w); return LB.weapon; },
   openPicker: function () { return openPicker(); },
   closePicker: function () { return closePicker(); },
+  /* ---- v4 hooks: day/night + weather + plane ---- */
+  timeOfDay: function () {
+    const s = LB.sky;
+    return s ? { t: Math.round(s.t * 10000) / 10000, phase: s.phase, light: Math.round(s.light * 1000) / 1000, night: Math.round(s.night * 1000) / 1000, sunUp: s.sun.up, moonUp: s.moon.up } : null;
+  },
+  setTimeOfDay: function (t) { LBSky.setT(t); return window.__TEST__.timeOfDay(); },
+  weather: function () { return LBWeather.info(); },
+  setWeather: function (s) { return LBWeather.force(s); },
+  advanceWeather: function () { return LBWeather.cycle(); },
+  spawnPlane: function () { return LBPlane.forceSpawn(); },
+  plane: function () { return LBPlane.info(); },
+  lightning: function () { return LBWeather.lightningInfo(); },
+  counters: function () {
+    return {
+      planeCrashes: LB.events.planeCrashes,
+      vehicleCrashes: LB.events.vehiclesExploded,
+      lightningStrikes: LB.events.lightningStrikes
+    };
+  },
   screenToWorld: screenToWorld,
   destroyAll: destroyAll,
   reset: function () { resetWorld(); },
@@ -5097,6 +5206,23 @@ window.__TEST__ = {
 /* ============================================================
    BOOT
    ============================================================ */
+/* v4 systems (sky.js / weather.js / plane.js) get the closure internals
+   they need through one deps bundle — getters for values that mutate
+   (canvas size/viewport), direct references for stable ones. */
+const LB_DEPS = {
+  M, world, LB, P, SPR, ctx,
+  W, H, GROUND_Y, WATER_Y, HORIZON_Y, ROAD_NEAR_Y,
+  CAT_VEHICLE, CAT_DEFAULT,
+  rand, clamp, dist, tag, removeBody, vehicleByBody, explodeVehicle,
+  planeImpactDamage,
+  step: function () { return stepCounter; },        // trail throttling
+  cw: function () { return cw; }, ch: function () { return ch; },
+  vs: function () { return vs; }, offY: function () { return offY; }
+};
+LBSky.init(LB_DEPS);
+LBWeather.init(LB_DEPS);
+LBPlane.init(LB_DEPS);
+
 addGround();
 buildTower();
 buildAnnex();
