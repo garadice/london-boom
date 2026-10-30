@@ -250,11 +250,14 @@ LB.audio = {
     this.voices++; o.onended = () => { this.voices--; };
   },
   nukeBoom() {
-    // huge low boom + long rumble decay (forced past the voice cap — it's THE moment)
+    // the big one: deep sub punch + huge boom + long low rumble decay (forced past the voice cap)
     if (!this.throttle('nukeBoom', 200)) return;
     this.noise(2.6, 1.0, 'lowpass', 700, 32, 0.6, true);
     this.tone('sine', 58, 16, 1.6, 1.0, 0, true);
+    this.tone('sine', 40, 13, 2.6, 0.85, 0.04, true);          // deeper sub layer
     this.noise(3.4, 0.24, 'lowpass', 260, 60, 0.8, true, 0.35);
+    this.noise(5.6, 0.28, 'lowpass', 190, 36, 0.7, true, 0.7); // long rumble decay ~5 s
+    this.crackle(9);                                           // faint crackle as it roars
   },
   waterRush(dur) {
     // band-passed noise swell — the wall of water arriving
@@ -657,7 +660,8 @@ LB.bombs = [];                   // v3: classic bombs (2 s auto-fuse)
 LB.novas = [];                   // v3: charging stars (3 s)
 LB.novaRings = [];               // v3: decorative expanding nova shockwaves
 LB.nukes = [];                   // v3: the big one (siren, then the wipe)
-LB.mushrooms = [];               // v3: nuke cloud visuals
+LB.nukeWaves = [];               // v3.1: the expanding vaporization front after detonation
+LB.mushrooms = [];               // v3: nuke cloud visuals (v3.1: multi-stage blob system)
 LB.tsunamis = [];                // v3: walls of water from the left edge
 LB.lasers = [];                  // v3: cutting beams
 LB.stones = [];                  // v3: rolling boulders
@@ -2052,7 +2056,7 @@ function explodeNuke(t) {
   t.on = false;
   const b = t.body;
   if (!b.plugin.lb || b.plugin.lb.removed) return;
-  const x = b.position.x, y = b.position.y;
+  const x = b.position.x, y = Math.min(b.position.y, GROUND_Y);
   removeBody(b, { silent: true });
   clearAllEffects();          // the wipe: no meteor / tornado / laser / ... survives it
   LB.flash = 1;               // full-screen white
@@ -2060,24 +2064,361 @@ function explodeNuke(t) {
   LB.events.explosions++;
   LB.events.shakes++;
   LB.audio.nukeBoom();
-  radialBlast(x, y, { core: 300, push: 1500, vehCore: 340, fling: 46, lift: 20, cutR: 430 });
-  P.ring(x, y, 34, 10);
-  P.ring(x, y, 22, 6, 'rgba(255,200,120,0.85)');
+  // v3.1: no instant radialBlast — an expanding vaporization front eats the skyline
+  LB.nukeWaves.push({ x: x, y: y, r: 0, speed: NUKE_WAVE_SPEED, popT: 0, crackleT: 0.3, maxR: 0 });
+  P.ring(x, y, 46, 12);
+  P.ring(x, y, 26, 7, 'rgba(255,200,120,0.85)');
   P.ring(x, y, 14, 4, 'rgba(255,240,200,0.9)');
-  // hot debris fan rising from the fireball
-  for (let k = 0; k < 130; k++) {
-    const a = -Math.PI / 2 + rand(-1.1, 1.1);
-    const v = rand(8, 26);
-    P.spawn('spark', x, y, {
-      vx: Math.cos(a) * v, vy: Math.sin(a) * v,
-      life: rand(0.7, 2.0), size: rand(5, 11), drag: 0.97, grav: 0.06,
-      spr: k % 3 === 0 ? SPR.glow.white : (k % 3 === 1 ? SPR.glow.orange : SPR.glow.gold)
-    });
-  }
   P.smoke(x, y, 26, true);
-  LB.mushrooms.push({ x: x, y: Math.min(y, GROUND_Y), t: 0, dur: 3.8 });
-  LB.decals.push({ x: x, y: Math.min(y, GROUND_Y + 8), size: 220, alpha: 0.6 });
+  spawnMushroom(x, y);
+  LB.decals.push({ x: x, y: GROUND_Y + 8, size: 260, alpha: 0.7 });
   if (LB.decals.length > 14) LB.decals.shift();
+}
+
+/* ---------------- the vaporization wave ----------------
+   An expanding destruction front (NUKE_WAVE_SPEED px/s) from the epicentre.
+   Landmark bodies it passes are REMOVED (vaporized) with debris/embers flying
+   radially OUT from the epicentre — harder the closer they were. Effects are
+   batched per ~64px cluster so ~900 blocks don't explode the particle budget.
+   Vehicles in the front are flung violently outward (existing flung path then
+   explodes them on landing, feeding the traffic counters). */
+const NUKE_WAVE_SPEED = 1080;   // px/s — whole 1600px world in ~1.5 s
+function stepNukeWaves(dts) {
+  for (let i = LB.nukeWaves.length - 1; i >= 0; i--) {
+    const w = LB.nukeWaves[i];
+    w.r += w.speed * dts;
+    w.popT -= dts;
+    w.crackleT -= dts;
+    // 1) landmark vaporization (tower / annex / all Eye parts incl. hub statics)
+    const clusters = {};        // spatial hash: one pop flash per cluster
+    let vaporized = 0;
+    for (let k = 0; k < LB.bodies.length; k++) {
+      const o = LB.bodies[k], lb = o.plugin.lb;
+      if (!lb || lb.removed) continue;
+      if (lb.set !== 'tower' && lb.set !== 'eye' && lb.set !== 'annex') continue;
+      const d = dist(o.position.x, o.position.y, w.x, w.y);
+      if (d > w.r) continue;
+      const col = lb.color || '#b9975a';
+      removeBody(o, { silent: true });   // constraints cleaned exactly like destroyAll()
+      vaporized++;
+      const cx = (o.position.x + 32) >> 6, cy = (o.position.y + 32) >> 6;
+      const key = cx * 4096 + cy;
+      if (!clusters[key]) clusters[key] = { x: o.position.x, y: o.position.y, n: 0, col: col, dSum: 0 };
+      const c = clusters[key];
+      c.n++;
+      c.x = (c.x * c.n + o.position.x) / (c.n + 1);
+      c.y = (c.y * c.n + o.position.y) / (c.n + 1);
+      c.dSum += d;
+    }
+    // 2) per-cluster vapor burst: radial debris + embers, tiny pop flash
+    let rings = 0;
+    for (const key in clusters) {
+      const c = clusters[key];
+      const dAvg = c.dSum / c.n;
+      const pow = 1 - clamp(dAvg / NUKE_WAVE_SPEED * 1.15, 0, 1); // closer to epicentre = harder
+      const spd = 9 + pow * 22;
+      const nDeb = 3 + (c.n > 2 ? 3 : 1);
+      for (let k = 0; k < nDeb; k++) {
+        const a = Math.atan2(c.y - w.y, c.x - w.x) + rand(-0.75, 0.75);
+        const v = spd * rand(0.55, 1.3);
+        P.spawn('debris', c.x, c.y, {
+          vx: Math.cos(a) * v, vy: Math.sin(a) * v - rand(1, 4),
+          life: rand(0.7, 1.6), size: rand(2.5, 6.5), grav: 0.14, drag: 0.99,
+          vr: rand(-0.4, 0.4), col: c.col
+        });
+      }
+      for (let k = 0; k < 3; k++) {
+        const a = Math.atan2(c.y - w.y, c.x - w.x) + rand(-1.0, 1.0);
+        const v = spd * rand(0.6, 1.2);
+        P.spawn('ember', c.x, c.y, {
+          vx: Math.cos(a) * v, vy: Math.sin(a) * v - rand(1.5, 4.5),
+          life: rand(0.6, 1.5), size: rand(4, 9), drag: 0.96,
+          spr: Math.random() < 0.5 ? SPR.glow.orange : SPR.glow.gold
+        });
+      }
+      if (rings < 2 && w.popT <= 0) {
+        P.ring(c.x, c.y, 9, 3, 'rgba(255,244,220,0.75)');
+        P.sparks(c.x, c.y, 4, SPR.glow.white, 5);
+        rings++;
+      }
+    }
+    if (rings) w.popT = 0.06;
+    // 3) faint crackle while the front is eating structures
+    if (vaporized > 0 && w.crackleT <= 0) {
+      LB.audio.crackle(2);
+      w.crackleT = 0.4;
+    }
+    // 4) vehicles in the front: flung violently outward (+ explodes on landing)
+    for (let k = LB.traffic.vehicles.length - 1; k >= 0; k--) {
+      const v = LB.traffic.vehicles[k], vb = v.body, vlb = vb.plugin.lb;
+      if (!vlb || vlb.removed || vlb.state === 'dead') continue;
+      const d = dist(vb.position.x, vb.position.y, w.x, w.y);
+      if (d > w.r) continue;
+      if (vlb.state === 'drive') flingVehicle(v, w.x);
+      if (vlb.state !== 'flung') continue;
+      const ux = (vb.position.x - w.x) / (d || 1), uy = (vb.position.y - w.y) / (d || 1);
+      M.Sleeping.set(vb, false);
+      M.Body.setVelocity(vb, { x: ux * rand(11, 17), y: uy * rand(4, 8) - rand(9, 14) });
+      M.Body.setAngularVelocity(vb, rand(-0.5, 0.5));
+    }
+    // done: the front has crossed every corner of the world
+    if (w.r > 2350) LB.nukeWaves.splice(i, 1);
+  }
+}
+
+/* ---------------- the mushroom cloud (hero effect) ----------------
+   Layered translucent blobs + additive glow, pure canvas. Stages:
+   fireball (0-0.8 s) -> stem churn (0.8 s+) -> rolling cap (~1.2 s+) ->
+   slow dissipate (~6.4 s+). Everything animates; never a static sprite. */
+const MUSH_DUR = 8.6;
+function spawnMushroom(x, y) {
+  const m = {
+    x: x, y: GROUND_Y, t: 0, dur: MUSH_DUR,
+    blobs: [],                    // { kind, t, life, x, y, vx, vy, size, grow, seed, ang, w, rho, dir }
+    ringsT: [1.35, 2.05, 2.9],    // smoke-ring puff times
+    rings: [],                    // expanding ellipse strokes
+    spawnAcc: 0, capAcc: 0, skirtAcc: 0, emberAcc: 0, ringIdx: 0,
+    drift: rand(-7, 7),
+    seed: Math.random() * 100
+  };
+  LB.mushrooms.push(m);
+  return m;
+}
+function mushCapParams(m) {
+  // cap centre height + radii over time (bloom out to ~500-700px wide)
+  const rise = 1 - Math.pow(1 - Math.min(1, m.t / 4.6), 3);
+  const capY = m.y - 46 - 386 * rise;
+  const bloom = 1 - Math.pow(1 - Math.min(1, Math.max(0, m.t - 1.0) / 3.4), 2.2);
+  const capA = 70 + 225 * bloom;   // semi-major (~500-700 px wide when fully bloomed)
+  const capB = 26 + 82 * bloom;    // semi-minor
+  return { capY: capY, capA: capA, capB: capB };
+}
+function mushStage(m) {
+  if (m.t < 0.8) return 'fireball';
+  if (m.t < 1.2) return 'stem';
+  if (m.t < 6.4) return 'cap';
+  return 'dissipate';
+}
+function stepMushroom(m, dts) {
+  m.t += dts;
+  m.x += m.drift * dts;                       // slow sideways drift
+  const cp = mushCapParams(m);
+  const sway = Math.sin(m.t * 1.25 + m.seed) * 10;
+
+  // stem churn: blobs spawn at the base, rise, expand, fade (until dissipate)
+  if (m.t > 0.55 && m.t < 6.4) {
+    const rate = m.t < 1.6 ? 34 : 24 - (m.t - 1.6) * 2.4;
+    m.spawnAcc += rate * dts;
+    while (m.spawnAcc >= 1) {
+      m.spawnAcc--;
+      const life = Math.min(rand(2.6, 4.1), m.dur - m.t - 0.15);
+      m.blobs.push({
+        kind: 'stem', t: 0, life: life,
+        x: m.x + rand(-24, 24), y: m.y - rand(-2, 16),
+        vx: rand(-5, 5), vy: -rand(105, 165),
+        size: rand(30, 50), grow: rand(15, 27),
+        seed: Math.random() * 100
+      });
+    }
+  }
+  // cap circulation: blobs rise through the centre, curl outward over the edges
+  if (m.t > 1.05 && m.t < 6.2) {
+    const rate = m.t < 2.2 ? 22 : 15;
+    m.capAcc += rate * dts;
+    while (m.capAcc >= 1) {
+      m.capAcc--;
+      const life = Math.min(rand(2.8, 4.3), m.dur - m.t - 0.15);
+      m.blobs.push({
+        kind: 'cap', t: 0, life: life,
+        x: m.x, y: cp.capY, vx: 0, vy: 0,
+        size: rand(30, 52), grow: rand(10, 20),
+        seed: Math.random() * 100,
+        ang: rand(0, Math.PI * 2),
+        w: rand(0.5, 0.9),                         // angular speed (rolling)
+        rho: rand(0.2, 0.55),                      // 0 = centre, 1 = rim
+        dir: rand(0.75, 1.25)                      // outward bloom speed
+      });
+    }
+  }
+  // skirt / base surge: ground-hugging ring curling outward (Wilson vibe)
+  if (m.t > 0.45 && m.t < 2.7) {
+    m.skirtAcc += 15 * dts;
+    while (m.skirtAcc >= 1) {
+      m.skirtAcc--;
+      const side = Math.random() < 0.5 ? -1 : 1;
+      const life = Math.min(rand(1.7, 2.7), m.dur - m.t - 0.15);
+      m.blobs.push({
+        kind: 'skirt', t: 0, life: life,
+        x: m.x + side * rand(8, 42), y: m.y - rand(0, 16),
+        vx: side * rand(55, 125), vy: -rand(3, 10),
+        size: rand(24, 42), grow: rand(20, 34),
+        seed: Math.random() * 100
+      });
+    }
+  }
+  // ember sparks riding up the stem
+  if (m.t < 5.6) {
+    m.emberAcc += 7 * dts;
+    while (m.emberAcc >= 1) {
+      m.emberAcc--;
+      m.blobs.push({
+        kind: 'ember', t: 0, life: rand(0.9, 1.5),
+        x: m.x + rand(-16, 16), y: m.y - rand(0, 10),
+        vx: rand(-6, 6), vy: -rand(150, 210),
+        size: rand(3, 6), grow: 0,
+        seed: Math.random() * 100
+      });
+    }
+  }
+  // early smoke rings puffing outward
+  while (m.ringIdx < m.ringsT.length && m.t >= m.ringsT[m.ringIdx]) {
+    m.rings.push({ t: 0, dur: 1.7, y: cp.capY + 14, a: 0.42, seed: Math.random() * 10 });
+    m.ringIdx++;
+  }
+  for (let i = m.rings.length - 1; i >= 0; i--) {
+    m.rings[i].t += dts;
+    if (m.rings[i].t > m.rings[i].dur) m.rings.splice(i, 1);
+  }
+
+  // advance blobs
+  for (let i = m.blobs.length - 1; i >= 0; i--) {
+    const b = m.blobs[i];
+    b.t += dts;
+    if (b.t >= b.life) { m.blobs.splice(i, 1); continue; }
+    if (b.kind === 'stem') {
+      // slight sway + gentle pull back to the (drifting) centreline
+      const homeX = m.x + sway * Math.sin(b.seed + m.t * 0.8) * 0.5;
+      b.vx += (homeX - b.x) * 0.9 * dts * 4;
+      b.vx += Math.sin(b.seed + m.t * 5.2) * 6 * dts;
+      b.vy *= 1 - 0.22 * dts;                    // slows as it climbs
+      // fade out approaching the cap (the cap "feeds" from the stem)
+      const head = (m.y - b.y) / Math.max(1, m.y - cp.capY);
+      if (head > 0.92) b.t += dts * 2.2;
+    } else if (b.kind === 'cap') {
+      b.ang += b.w * dts;                        // rolling read
+      b.rho = Math.min(1.22, b.rho + b.dir * 0.2 * dts * (1 + b.rho));
+      b.x = m.x + Math.cos(b.ang) * cp.capA * b.rho;
+      b.y = cp.capY + Math.sin(b.ang) * cp.capB * b.rho;
+    } else if (b.kind === 'skirt') {
+      b.vx *= 1 - 0.55 * dts;
+      b.vy -= 8 * dts;                           // curls upward at the end
+    } else if (b.kind === 'ember') {
+      b.vy *= 1 - 0.3 * dts;
+    }
+    b.x += b.vx * dts;
+    b.y += b.vy * dts;
+    b.size += b.grow * dts;
+  }
+}
+function drawMushrooms() {
+  for (let mi = 0; mi < LB.mushrooms.length; mi++) {
+    const m = LB.mushrooms[mi];
+    const cp = mushCapParams(m);
+    const globFade = m.t > m.dur - 1.2 ? Math.max(0, (m.dur - m.t) / 1.2) : 1;
+
+    /* --- pass 1 (source-over): cool smoke bodies, oldest first --- */
+    ctx.globalCompositeOperation = 'source-over';
+    for (let pass = 0; pass < 2; pass++) {
+      // pass 0: ash-gray mass; pass 1: cool top highlights
+      for (let i = 0; i < m.blobs.length; i++) {
+        const b = m.blobs[i];
+        if (b.kind === 'ember') continue;
+        const k = b.t / b.life;
+        const alpha = Math.sin(Math.min(1, k) * Math.PI) * 0.62 * globFade;
+        if (alpha <= 0.01) continue;
+        const hot = clamp(1 - b.t / 1.4, 0, 1);
+        if (pass === 0) {
+          // cooling ash: light enough to read against the night sky, darkening with age
+          const g = 128 + 62 * (1 - k);
+          ctx.globalAlpha = Math.min(1, alpha * (1 - hot * 0.5));
+          ctx.fillStyle = 'rgb(' + Math.round(g + hot * 110) + ',' + Math.round(g * 0.94 + hot * 52) + ',' + Math.round(g * 0.92 + hot * 18) + ')';
+          ctx.beginPath();
+          ctx.arc(b.x, b.y, b.size, 0, Math.PI * 2);
+          ctx.fill();
+        } else {
+          // cool gray highlight rim on the upper edge (light from the dying core)
+          ctx.globalAlpha = Math.min(1, alpha * 0.6);
+          ctx.fillStyle = 'rgb(206,211,224)';
+          ctx.beginPath();
+          ctx.arc(b.x - b.size * 0.22, b.y - b.size * 0.26, b.size * 0.62, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+    }
+    // smoke rings puffing outward (ellipse strokes)
+    for (let i = 0; i < m.rings.length; i++) {
+      const r = m.rings[i], k = r.t / r.dur;
+      ctx.globalAlpha = (1 - k) * r.a * globFade;
+      ctx.strokeStyle = 'rgb(214,218,228)';
+      ctx.lineWidth = 5 + 9 * (1 - k);
+      ctx.beginPath();
+      ctx.ellipse(m.x, r.y, 40 + 300 * k, (40 + 300 * k) * 0.32, 0, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+
+    /* --- pass 2 (lighter): fireball, hot cores, embers --- */
+    ctx.globalCompositeOperation = 'lighter';
+    // the detonation keeps the whole screen lit for a beat (flash decay alone is ~0.1 s)
+    if (m.t < 0.55) {
+      ctx.globalAlpha = (1 - m.t / 0.55) * 0.85 * globFade;
+      ctx.fillStyle = 'rgb(255,247,235)';
+      ctx.fillRect(-2000, -1200, 6000, 3600);
+    }
+    // stage 1: the fireball — blinding white -> orange, flickering
+    if (m.t < 1.7) {
+      const fk = Math.min(1, m.t / 0.8);
+      const fr = 30 + 150 * (1 - Math.pow(1 - fk, 2));
+      const sink = m.t > 0.8 ? 1 - (m.t - 0.8) / 0.9 : 1;   // collapses into the stem
+      const flick = 0.86 + 0.14 * Math.sin(m.t * 63 + m.seed * 7);
+      const ga = globFade * (0.5 + 0.5 * sink);
+      ctx.globalAlpha = ga * flick;
+      ctx.drawImage(SPR.glow.orange, m.x - fr * 2.1, m.y - fr * 2.1, fr * 4.2, fr * 4.2);
+      ctx.globalAlpha = ga * flick;
+      ctx.drawImage(SPR.glow.white, m.x - fr * 1.15, m.y - fr * 1.15 - fr * 0.3, fr * 2.3, fr * 2.3);
+      ctx.globalAlpha = ga * flick * 0.9;
+      ctx.drawImage(SPR.glow.white, m.x - fr * 0.62, m.y - fr * 0.62 - fr * 0.18, fr * 1.24, fr * 1.24);
+      ctx.globalAlpha = 1;
+    }
+    // hot cores of young blobs (incandescent orange -> red)
+    for (let i = 0; i < m.blobs.length; i++) {
+      const b = m.blobs[i];
+      const hot = clamp(1 - b.t / 1.4, 0, 1);
+      if (hot <= 0.02) continue;
+      const k = b.t / b.life;
+      const flick = 0.8 + 0.2 * Math.sin(b.seed * 13 + m.t * 31);
+      if (b.kind === 'ember') {
+        ctx.globalAlpha = Math.min(1, (1 - k) * 0.9) * globFade;
+        ctx.drawImage(SPR.glow.gold, b.x - b.size * 2, b.y - b.size * 2, b.size * 4, b.size * 4);
+      } else {
+        const s = b.size * (0.9 + hot * 0.7);
+        ctx.globalAlpha = clamp(hot * 0.55, 0, 1) * flick * (1 - k * 0.4) * globFade;
+        ctx.drawImage(hot > 0.55 ? SPR.glow.orange : SPR.glow.red, b.x - s, b.y - s, s * 2, s * 2);
+      }
+    }
+    // stem hot core column (tapered glow between base and cap while churning)
+    if (m.t > 0.55 && m.t < 6.4) {
+      const sh = m.y - cp.capY;
+      const sg = ctx.createLinearGradient(0, m.y, 0, cp.capY);
+      let sa = (m.t < 1.6 ? 0.34 : 0.3 - (m.t - 1.6) * 0.045) * globFade;
+      if (m.t > 3) sa *= Math.max(0.35, 1 - (m.t - 3) * 0.28);
+      sg.addColorStop(0, 'rgba(255,170,70,' + Math.max(0, sa).toFixed(3) + ')');
+      sg.addColorStop(0.75, 'rgba(255,105,45,' + Math.max(0, sa * 0.5).toFixed(3) + ')');
+      sg.addColorStop(1, 'rgba(255,70,35,0)');
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = sg;
+      const swB = (78 + 46 * Math.min(1, m.t / 2)) * (1 + 0.06 * Math.sin(m.t * 9 + m.seed));
+      const swT = swB * 0.5;
+      ctx.beginPath();
+      ctx.moveTo(m.x - swB / 2, m.y);
+      ctx.lineTo(m.x - swT / 2, cp.capY);
+      ctx.lineTo(m.x + swT / 2, cp.capY);
+      ctx.lineTo(m.x + swB / 2, m.y);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
 }
 
 /* ---------------- TSUNAMI 🌊 — wall of water from the left edge ---------------- */
@@ -2684,10 +3025,12 @@ function stepWeapons(dt) {
       explodeNuke(t);
     }
   }
-  // mushroom visuals
+  // v3.1: the vaporization front eats the skyline
+  stepNukeWaves(dts);
+  // mushroom visuals: multi-stage animated cloud (v3.1)
   for (let i = LB.mushrooms.length - 1; i >= 0; i--) {
     const m = LB.mushrooms[i];
-    m.t += dts;
+    stepMushroom(m, dts);
     if (m.t > m.dur) LB.mushrooms.splice(i, 1);
   }
   stepTsunamis(dts);
@@ -3051,7 +3394,7 @@ function resetWorld() {
   LB.constraints = [];
   LB.meteors = []; LB.holes = []; LB.tornados = []; LB.rockets = [];
   LB.tnts = [];
-  LB.bombs = []; LB.novas = []; LB.novaRings = []; LB.nukes = []; LB.mushrooms = [];
+  LB.bombs = []; LB.novas = []; LB.novaRings = []; LB.nukes = []; LB.nukeWaves = []; LB.mushrooms = [];
   LB.tsunamis = []; LB.lasers = []; LB.stones = []; LB.vortices = []; LB.fires = [];
   LB.decals = [];
   LB.tower.bodies = []; LB.tower.clockBodies = []; LB.tower.lanternBodies = [];
@@ -4219,39 +4562,84 @@ function drawNukes() {
   for (let i = 0; i < LB.nukes.length; i++) {
     const t = LB.nukes[i], b = t.body;
     const armed = t.t / t.dur;
-    const blink = armed > 0.3 && (t.t % Math.max(0.12, 0.7 - armed * 0.55)) < 0.06 + armed * 0.08;
+    const blink = armed > 0.12 && (t.t % Math.max(0.1, 0.6 - armed * 0.5)) < 0.05 + armed * 0.07;
+    // placement pop: quick settle-scale on spawn (subtle hover/settle read)
+    const pop = Math.min(1, t.t / 0.28);
+    const scale = 0.55 + 0.45 * (1 - Math.pow(1 - pop, 3));
     ctx.save();
     ctx.translate(b.position.x, b.position.y);
     ctx.rotate(b.angle);
-    ctx.fillStyle = '#7e848f';
+    ctx.scale(scale, scale);
+    // ground shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.beginPath();
+    ctx.ellipse(0, h + 4, h * 0.82, 5, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // dark matte casing
+    ctx.fillStyle = '#262a32';
     ctx.fillRect(-h, -h, NUKE_SIZE, NUKE_SIZE);
-    ctx.fillStyle = 'rgba(20,22,30,0.5)';
-    ctx.fillRect(-h, -h, NUKE_SIZE, 3);
-    ctx.fillRect(-h, h - 3, NUKE_SIZE, 3);
-    ctx.fillRect(-h, -h, 3, NUKE_SIZE);
-    ctx.fillRect(h - 3, -h, 3, NUKE_SIZE);
-    // trefoil
-    ctx.fillStyle = blink ? '#fff3b0' : '#ffd23e';
-    for (let s = 0; s < 3; s++) {
-      const a0 = -Math.PI / 2 + s * (Math.PI * 2 / 3) - 0.52;
+    ctx.fillStyle = 'rgba(255,255,255,0.07)';           // top bevel light
+    ctx.fillRect(-h + 3, -h + 3, NUKE_SIZE - 6, 5);
+    ctx.fillStyle = 'rgba(0,0,0,0.42)';                 // bottom shade
+    ctx.fillRect(-h + 3, h - 8, NUKE_SIZE - 6, 5);
+    ctx.strokeStyle = '#0e1015';
+    ctx.lineWidth = 3;
+    ctx.strokeRect(-h + 1.5, -h + 1.5, NUKE_SIZE - 3, NUKE_SIZE - 3);
+    // hazard stripes: diagonal yellow/black bands top + bottom
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(-h + 3, -h + 3, NUKE_SIZE - 6, 8);
+    ctx.rect(-h + 3, h - 11, NUKE_SIZE - 6, 8);
+    ctx.clip();
+    ctx.fillStyle = '#15171d';
+    ctx.fillRect(-h, -h, NUKE_SIZE, NUKE_SIZE);
+    ctx.fillStyle = '#e0a90c';
+    for (let sx = -h - 12; sx < h + 12; sx += 14) {
       ctx.beginPath();
-      ctx.moveTo(0, 0);
-      ctx.arc(0, 0, h * 0.62, a0, a0 + 1.05);
+      ctx.moveTo(sx, h);
+      ctx.lineTo(sx + 7, h);
+      ctx.lineTo(sx + 7 + 16, -h);
+      ctx.lineTo(sx + 16, -h);
       ctx.closePath();
       ctx.fill();
     }
-    ctx.beginPath(); ctx.arc(0, 0, h * 0.16, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+    // trefoil on a dark disc
+    ctx.fillStyle = '#15181e';
+    ctx.beginPath(); ctx.arc(0, 0, h * 0.56, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = blink ? '#ffe9a8' : '#e0a90c';
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(0, 0, h * 0.56, 0, Math.PI * 2); ctx.stroke();
+    ctx.fillStyle = blink ? '#fff3b0' : '#ffd23e';
+    for (let s = 0; s < 3; s++) {
+      const a0 = -Math.PI / 2 + s * (Math.PI * 2 / 3) - 0.5;
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.arc(0, 0, h * 0.5, a0, a0 + 1.0);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.beginPath(); ctx.arc(0, 0, h * 0.13, 0, Math.PI * 2); ctx.fill();
     ctx.fillStyle = '#23252e';
-    ctx.beginPath(); ctx.arc(0, 0, h * 0.10, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(0, 0, h * 0.08, 0, Math.PI * 2); ctx.fill();
+    // armed red LED (top-right corner)
     if (blink) {
-      ctx.fillStyle = 'rgba(255,255,255,0.5)';
-      ctx.fillRect(-h, -h, NUKE_SIZE, NUKE_SIZE);
+      ctx.fillStyle = '#ff2d2d';
+      ctx.beginPath(); ctx.arc(h - 11, -h + 15, 3.4, 0, Math.PI * 2); ctx.fill();
+    } else {
+      ctx.fillStyle = '#57181b';
+      ctx.beginPath(); ctx.arc(h - 11, -h + 15, 3.4, 0, Math.PI * 2); ctx.fill();
     }
     ctx.restore();
-    // siren glow
+    // armed glow: sweeping warning light + red pulse, brighter as the fuse burns
     ctx.globalCompositeOperation = 'lighter';
-    ctx.globalAlpha = 0.25 + 0.3 * armed;
-    ctx.drawImage(SPR.glow.red, b.position.x - 60, b.position.y - 60, 120, 120);
+    const sweepA = 0.1 + 0.16 * armed;
+    const swp = b.position.x + Math.cos(LB.time * 2.8) * h * 1.15;
+    const swy = b.position.y + Math.sin(LB.time * 2.8) * h * 1.15;
+    ctx.globalAlpha = sweepA * (blink ? 1.6 : 1);
+    ctx.drawImage(SPR.glow.red, swp - 46, swy - 46, 92, 92);
+    ctx.globalAlpha = 0.16 + 0.22 * armed + (blink ? 0.14 : 0);
+    ctx.drawImage(SPR.glow.red, b.position.x - 64, b.position.y - 64, 128, 128);
     ctx.globalCompositeOperation = 'source-over';
     ctx.globalAlpha = 1;
   }
@@ -4442,38 +4830,6 @@ function drawFires(t) {
   }
   ctx.globalAlpha = 1;
   ctx.globalCompositeOperation = 'source-over';
-}
-
-function drawMushrooms() {
-  for (let i = 0; i < LB.mushrooms.length; i++) {
-    const m = LB.mushrooms[i];
-    const k = m.t / m.dur;
-    const grow = Math.min(1, k * 2.2);
-    const fade = k > 0.68 ? Math.max(0, 1 - (k - 0.68) / 0.32) : 1;
-    const stemH = 330 * grow;
-    const capR = 185 * grow;
-    const ease = 1 - Math.pow(1 - grow, 2);
-    ctx.globalCompositeOperation = 'lighter';
-    // stem: hot column
-    const sg = ctx.createLinearGradient(0, m.y, 0, m.y - stemH);
-    sg.addColorStop(0, 'rgba(255,190,90,' + (0.5 * fade).toFixed(3) + ')');
-    sg.addColorStop(0.7, 'rgba(255,120,45,' + (0.34 * fade).toFixed(3) + ')');
-    sg.addColorStop(1, 'rgba(255,80,40,' + (0.12 * fade).toFixed(3) + ')');
-    ctx.fillStyle = sg;
-    const sw = 30 + 26 * ease;
-    ctx.fillRect(m.x - sw / 2, m.y - stemH, sw, stemH);
-    // cap: glowing dome
-    const capY = m.y - stemH;
-    ctx.globalAlpha = 0.85 * fade;
-    ctx.drawImage(SPR.glow.orange, m.x - capR, capY - capR * 0.9, capR * 2, capR * 1.8);
-    ctx.globalAlpha = 0.6 * fade;
-    ctx.drawImage(SPR.glow.gold, m.x - capR * 0.62, capY - capR * 0.6, capR * 1.24, capR * 1.2);
-    // ground fireball
-    ctx.globalAlpha = 0.5 * fade;
-    ctx.drawImage(SPR.glow.white, m.x - 70 * ease, m.y - 70 * ease, 140 * ease, 140 * ease);
-    ctx.globalAlpha = 1;
-    ctx.globalCompositeOperation = 'source-over';
-  }
 }
 
 function drawReticle(t) {
@@ -4685,6 +5041,30 @@ window.__TEST__ = {
   },
   weaponFired: LB.weaponFired,
   events: LB.events,
+  nuke: function () {
+    const w = LB.nukeWaves[0] || null;
+    return {
+      nukes: LB.nukes.length,
+      wave: w ? {
+        x: Math.round(w.x), y: Math.round(w.y),
+        r: Math.round(w.r), speed: w.speed,
+        progress: Math.round(Math.min(1, w.r / 2350) * 1000) / 1000
+      } : null,
+      cloud: LB.mushrooms.length ? {
+        t: Math.round(LB.mushrooms[0].t * 100) / 100,
+        dur: LB.mushrooms[0].dur,
+        stage: mushStage(LB.mushrooms[0]),
+        capWidth: Math.round(mushCapParams(LB.mushrooms[0]).capA * 2),
+        blobs: LB.mushrooms[0].blobs.length
+      } : null
+    };
+  },
+  landmarksRemaining: function () {
+    return {
+      tower: aliveOf('tower'), eye: aliveOf('eye'), annex: aliveOf('annex'),
+      total: aliveOf('tower') + aliveOf('eye') + aliveOf('annex')
+    };
+  },
   state: function () {
     const s = fpsSamples.slice().sort(function (a, b) { return a - b; });
     const med = s.length ? s[(s.length / 2) | 0] : 0;
@@ -4694,6 +5074,7 @@ window.__TEST__ = {
       meteors: LB.meteors.length, holes: LB.holes.length, tornados: LB.tornados.length,
       tnts: LB.tnts.length,
       bombs: LB.bombs.length, novas: LB.novas.length, nukes: LB.nukes.length,
+      nukeWaves: LB.nukeWaves.length,
       tsunamis: LB.tsunamis.length, lasers: LB.lasers.length, stones: LB.stones.length,
       vortices: LB.vortices.length, fires: LB.fires.length,
       mushrooms: LB.mushrooms.length,
