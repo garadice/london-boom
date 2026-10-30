@@ -77,4 +77,4 @@ in Chrome → ⋮ → **Install app**; after the first load it runs offline.
 Physics: Matter.js by @liabru (MIT), vendored. Everything else hand-rolled
 Canvas2D + WebAudio, made with 💥 for a small destroyer of cities.
 
-MIT — see [LICENSE](LICENSE). © 2026 Martin Mogis.
+MIT — see [LICENSE](LICENSE).
