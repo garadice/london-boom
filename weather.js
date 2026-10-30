@@ -318,6 +318,7 @@ window.LBWeather = (function () {
 
   function begin(name, dur) {
     from = copyOf(cur);
+    state = name;                 // the weather IS what it is becoming (blend carries the visuals)
     target = name;
     blendDur = dur;
     blend = 0;

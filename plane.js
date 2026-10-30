@@ -220,7 +220,21 @@ window.LBPlane = (function () {
     }
   }
 
-  /* ============================================================ */
+  /* ---------------- API for game.js ---------------- */
+  function info() {
+    return {
+      onScreen: !!plane,
+      state: plane ? plane.state : null,
+      crashes: crashes.length,
+      planeCrashes: D.LB.events.planeCrashes,
+      nextSpawnIn: plane ? null : Math.round(nextSpawn * 10) / 10,
+      x: plane ? Math.round(plane.body.position.x) : null,
+      y: plane ? Math.round(plane.body.position.y) : null,
+      dir: plane ? plane.body.plugin.lb.dir : null,
+      speed: plane ? Math.round(plane.body.plugin.lb.speed * 100) / 100 : null
+    };
+  }
+
   return {
     init: function (deps) { D = deps; },
 
@@ -278,19 +292,7 @@ window.LBPlane = (function () {
       if (plane) despawn();
       nextSpawn = rand(8, 16);
     },
-    info: function () {
-      return {
-        onScreen: !!plane,
-        state: plane ? plane.state : null,
-        crashes: crashes.length,
-        planeCrashes: D.LB.events.planeCrashes,
-        nextSpawnIn: plane ? null : Math.round(nextSpawn * 10) / 10,
-        x: plane ? Math.round(plane.body.position.x) : null,
-        y: plane ? Math.round(plane.body.position.y) : null,
-        dir: plane ? plane.body.plugin.lb.dir : null,
-        speed: plane ? Math.round(plane.body.plugin.lb.speed * 100) / 100 : null
-      };
-    },
+    info: function () { return info(); },
     forceSpawn: function () {
       if (plane) return info();
       nextSpawn = 0;
