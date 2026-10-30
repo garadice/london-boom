@@ -112,9 +112,9 @@ LB.audio = {
     this.muted = m;
     if (this.master) this.master.gain.value = m ? 0 : 0.9;
   },
-  noise(dur, vol, filterType, f0, f1, q, force) {
+  noise(dur, vol, filterType, f0, f1, q, force, delay) {
     if (!(force ? this.okBell() : this.ok())) return;
-    const c = this.ctx, t = c.currentTime;
+    const c = this.ctx, t = c.currentTime + (delay || 0);
     const src = c.createBufferSource(); src.buffer = this.noiseBuf; src.loop = true;
     const fl = c.createBiquadFilter(); fl.type = filterType; fl.Q.value = q || 1;
     fl.frequency.setValueAtTime(f0, t);
@@ -188,6 +188,146 @@ LB.audio = {
         'bandpass', 2200 + Math.random() * 2200, 1800, 3), d * 1000);
     }
   },
+  /* ---- v3 arsenal sounds (all synthesized; every loop honours mute via master) ---- */
+  boomDeep(p) {
+    // round bombs: a fatter, lower boom than TNT
+    p = p || 1;
+    if (!this.throttle('boom', 70)) return;
+    this.noise(0.9 * p + 0.2, 0.9 * p, 'lowpass', 520, 45, 0.7);
+    this.tone('sine', 68, 22, 0.7 + 0.25 * p, 0.85 * p);
+  },
+  tripleBoom() {
+    // TNT BEN: three staggered detonations, rising intensity
+    const self = this;
+    this.boomDeep(0.8);
+    setTimeout(function () { self.boomDeep(1.05); }, 130);
+    setTimeout(function () { self.boomDeep(1.3); self.crackle(14); }, 270);
+  },
+  novaCharge(dur) {
+    // rising shimmer while the star gathers (one shot, ~3 s)
+    const c = this.ctx;
+    if (!c || this.muted) return;
+    const t = c.currentTime;
+    for (let i = 0; i < 2; i++) {
+      const o = c.createOscillator(); o.type = 'sine';
+      o.frequency.setValueAtTime(300 + i * 26, t);
+      o.frequency.exponentialRampToValueAtTime(1500 + i * 90, t + dur);
+      const g = c.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.12 - i * 0.04, t + dur * 0.75);
+      g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+      o.connect(g); g.connect(this.master);
+      o.start(t); o.stop(t + dur + 0.05);
+      this.voices++; o.onended = () => { this.voices--; };
+    }
+    this.noise(dur, 0.05, 'highpass', 2000, 5200, 1);
+  },
+  novaBoom() {
+    // BIG warm boom + sparkle crackle tail
+    if (!this.throttle('novaBoom', 120)) return;
+    this.noise(1.3, 0.95, 'lowpass', 1100, 55, 0.7);
+    this.tone('sine', 120, 28, 0.9, 0.9);
+    this.tone('triangle', 520, 90, 0.5, 0.22, 0.02);
+    this.crackle(26);
+  },
+  sirenWail(dur) {
+    // classic rising-falling siren, kept kid-soft
+    const c = this.ctx;
+    if (!c || this.muted) return;
+    const t = c.currentTime;
+    const o = c.createOscillator(); o.type = 'sine';
+    o.frequency.setValueAtTime(420, t);
+    o.frequency.linearRampToValueAtTime(880, t + dur * 0.32);
+    o.frequency.linearRampToValueAtTime(430, t + dur * 0.64);
+    o.frequency.linearRampToValueAtTime(760, t + dur);
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.15, t + 0.25);
+    g.gain.setValueAtTime(0.15, t + dur - 0.2);
+    g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    o.connect(g); g.connect(this.master);
+    o.start(t); o.stop(t + dur + 0.05);
+    this.voices++; o.onended = () => { this.voices--; };
+  },
+  nukeBoom() {
+    // huge low boom + long rumble decay (forced past the voice cap — it's THE moment)
+    if (!this.throttle('nukeBoom', 200)) return;
+    this.noise(2.6, 1.0, 'lowpass', 700, 32, 0.6, true);
+    this.tone('sine', 58, 16, 1.6, 1.0, 0, true);
+    this.noise(3.4, 0.24, 'lowpass', 260, 60, 0.8, true, 0.35);
+  },
+  waterRush(dur) {
+    // band-passed noise swell — the wall of water arriving
+    const c = this.ctx;
+    if (!c || this.muted) return;
+    const t = c.currentTime;
+    const src = c.createBufferSource(); src.buffer = this.noiseBuf; src.loop = true;
+    const fl = c.createBiquadFilter(); fl.type = 'bandpass'; fl.Q.value = 0.8;
+    fl.frequency.setValueAtTime(320, t);
+    fl.frequency.linearRampToValueAtTime(1350, t + dur * 0.5);
+    fl.frequency.linearRampToValueAtTime(520, t + dur);
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(0.4, t + dur * 0.35);
+    g.gain.linearRampToValueAtTime(0.0001, t + dur);
+    src.connect(fl); fl.connect(g); g.connect(this.master);
+    src.start(t); src.stop(t + dur + 0.05);
+    this.voices++; src.onended = () => { this.voices--; };
+  },
+  laserHumStart(ent) {
+    if (!this.ok() || ent.audio) return;
+    try {
+      const c = this.ctx;
+      const o = c.createOscillator(); o.type = 'sawtooth'; o.frequency.value = 92;
+      const lfo = c.createOscillator(); lfo.frequency.value = 13;
+      const lfoG = c.createGain(); lfoG.gain.value = 26;
+      lfo.connect(lfoG); lfoG.connect(o.frequency);
+      const fl = c.createBiquadFilter(); fl.type = 'lowpass'; fl.frequency.value = 2400;
+      const g = c.createGain();
+      g.gain.setValueAtTime(0.0001, c.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.1, c.currentTime + 0.09);
+      o.connect(fl); fl.connect(g); g.connect(this.master);
+      o.start(); lfo.start();
+      ent.audio = { src: o, lfo: lfo, g: g };
+    } catch (e) { ent.audio = null; }
+  },
+  laserHumStop(ent) {
+    if (!ent.audio || !this.ctx) return;
+    try {
+      const a = ent.audio, c = this.ctx;
+      a.g.gain.cancelScheduledValues(c.currentTime);
+      a.g.gain.setValueAtTime(Math.max(a.g.gain.value, 0.001), c.currentTime);
+      a.g.gain.exponentialRampToValueAtTime(0.001, c.currentTime + 0.12);
+      a.src.stop(c.currentTime + 0.16); a.lfo.stop(c.currentTime + 0.16);
+    } catch (e) {}
+    ent.audio = null;
+  },
+  sizzle() {
+    if (!this.throttle('sizzle', 70)) return;
+    this.noise(0.08, 0.12, 'bandpass', 3400, 2600, 2.5);
+  },
+  swirlStart(ent) {
+    // swirling water: band-passed noise with a wobbly centre frequency
+    if (!this.ok() || ent.audio) return;
+    try {
+      const c = this.ctx;
+      const src = c.createBufferSource(); src.buffer = this.noiseBuf; src.loop = true;
+      const fl = c.createBiquadFilter(); fl.type = 'bandpass'; fl.frequency.value = 640; fl.Q.value = 2.2;
+      const lfo = c.createOscillator(); lfo.frequency.value = 2.6;
+      const lfoG = c.createGain(); lfoG.gain.value = 320;
+      lfo.connect(lfoG); lfoG.connect(fl.frequency);
+      const g = c.createGain();
+      g.gain.setValueAtTime(0.0001, c.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.22, c.currentTime + 0.5);
+      src.connect(fl); fl.connect(g); g.connect(this.master);
+      src.start(); lfo.start();
+      ent.audio = { src: src, lfo: lfo, g: g };
+    } catch (e) { ent.audio = null; }
+  },
+  swirlStop(ent) { this.rumbleStop(ent); },
+  pop() { if (this.ok()) this.tone('sine', 480, 900, 0.09, 0.16); },
+  click() { if (this.ok()) this.tone('triangle', 820, 1250, 0.06, 0.14); },
+
   rumbleStart(ent) {
     if (!this.ok() || ent.audio) return;
     try {
@@ -512,7 +652,18 @@ LB.constraints = [];            // landmark constraints (for cleanup + stress)
 LB.meteors = [];
 LB.holes = [];
 LB.tornados = [];
-LB.tnts = [];                    // lit TNT blocks (each on its own fuse)
+LB.tnts = [];                    // lit TNT blocks (each on its own fuse; TNT BEN rides the same list)
+LB.bombs = [];                   // v3: classic bombs (2 s auto-fuse)
+LB.novas = [];                   // v3: charging stars (3 s)
+LB.novaRings = [];               // v3: decorative expanding nova shockwaves
+LB.nukes = [];                   // v3: the big one (siren, then the wipe)
+LB.mushrooms = [];               // v3: nuke cloud visuals
+LB.tsunamis = [];                // v3: walls of water from the left edge
+LB.lasers = [];                  // v3: cutting beams
+LB.stones = [];                  // v3: rolling boulders
+LB.vortices = [];                // v3: water whirlpools
+LB.fires = [];                   // v3: pyre crates -> spreading fire waves
+LB.paused = false;               // weapon picker open = the whole sim holds its breath
 LB.rockets = [];
 LB.decals = [];                 // scorch marks
 LB.time = 0;
@@ -520,7 +671,7 @@ LB.shake = 0;
 LB.flash = 0;
 LB.phase = 'title';             // title | play | finale
 LB.weapon = 'meteor';
-LB.weaponFired = { meteor: 0, blackhole: 0, tornado: 0, tnt: 0 };
+LB.weaponFired = { meteor: 0, blackhole: 0, tornado: 0, tnt: 0, bomb: 0, tnt_ben: 0, nova: 0, nuke: 0, tsunami: 0, laser: 0, stone: 0, vortex: 0, fire: 0 };
 LB.events = { explosions: 0, consumed: 0, fireworks: 0, brokenConstraints: 0, shakes: 0, splashes: 0, destroyedAll: 0, resets: 0, tntPlaced: 0, tntExploded: 0, vehiclesExploded: 0, vehiclesFlung: 0, brokenBell: 0 };
 LB.tower = { bodies: [], clockBodies: [], lanternBodies: [], topBodies: [], total: 0 };
 LB.traffic = { vehicles: [], counts: { onScreen: 0, exploded: 0, flung: 0 }, spawnTimer: 1.2, nextId: 1 };
@@ -1177,7 +1328,7 @@ function drawVehicles(laneFilter) {
    WEAPONS
    ============================================================ */
 function fire(weapon, wx, wy) {
-  if (LB.phase === 'title') return false;
+  if (LB.phase === 'title' || LB.paused) return false;
   if (weapon === 'meteor') {
     if (LB.meteors.length >= 4) return false;
     spawnMeteor(wx, wy);
@@ -1208,6 +1359,66 @@ function fire(weapon, wx, wy) {
     spawnTNT(clamp(wx, 40, W - 40), clamp(wy, 40, H - 40));
     LB.weaponFired.tnt++;
     LB.events.tntPlaced++;
+    return true;
+  }
+  if (weapon === 'bomb') {
+    if (LB.bombs.length >= 6) return false;
+    if (!isFinite(wx) || !isFinite(wy)) return false;
+    spawnBomb(clamp(wx, 40, W - 40), clamp(wy, 40, GROUND_Y - 10));
+    LB.weaponFired.bomb++;
+    return true;
+  }
+  if (weapon === 'tnt_ben') {
+    if (LB.tnts.length >= 8) return false;
+    if (!isFinite(wx) || !isFinite(wy)) return false;
+    spawnTntBen(clamp(wx, 60, W - 60), clamp(wy, 130, GROUND_Y - 60));
+    LB.weaponFired.tnt_ben++;
+    return true;
+  }
+  if (weapon === 'nova') {
+    if (LB.novas.length >= 3) return false;
+    if (!isFinite(wx) || !isFinite(wy)) return false;
+    spawnNova(clamp(wx, 80, W - 80), clamp(wy, 60, GROUND_Y - 34));
+    LB.weaponFired.nova++;
+    return true;
+  }
+  if (weapon === 'nuke') {
+    if (LB.nukes.length >= 1) return false;
+    if (!isFinite(wx) || !isFinite(wy)) return false;
+    spawnNuke(clamp(wx, 90, W - 90), clamp(wy, 60, GROUND_Y - 30));
+    LB.weaponFired.nuke++;
+    return true;
+  }
+  if (weapon === 'tsunami') {
+    if (LB.tsunamis.length >= 1) return false;
+    spawnTsunami();
+    LB.weaponFired.tsunami++;
+    return true;
+  }
+  if (weapon === 'laser') {
+    if (LB.lasers.length >= 1) return false;
+    spawnLaser(wx, wy);
+    LB.weaponFired.laser++;
+    return true;
+  }
+  if (weapon === 'stone') {
+    if (LB.stones.length >= 2) return false;
+    spawnStone();
+    LB.weaponFired.stone++;
+    return true;
+  }
+  if (weapon === 'vortex') {
+    if (LB.vortices.length >= 2) return false;
+    if (!isFinite(wx)) return false;
+    spawnVortex(wx);
+    LB.weaponFired.vortex++;
+    return true;
+  }
+  if (weapon === 'fire') {
+    if (LB.fires.length >= 3) return false;
+    if (!isFinite(wx)) return false;
+    spawnFire(clamp(wx, 60, W - 60));
+    LB.weaponFired.fire++;
     return true;
   }
   return false;
@@ -1288,11 +1499,12 @@ const TNT_SIZE = 34;
 const TNT_FUSE = 3.0;
 let tntSeq = 0;
 
-function tntBlinkOn(elapsed) {
+function tntBlinkOn(elapsed, dur) {
   // Minecraft flash: white blink whose period shortens toward detonation.
   // Pure function of elapsed time (deterministic, testable). ON fraction is 35%
   // so the iconic red block dominates still frames mid-fuse.
-  const f = clamp(elapsed / TNT_FUSE, 0, 1);
+  const fuse = dur || TNT_FUSE;
+  const f = clamp(elapsed / fuse, 0, 1);
   const period = Math.max(0.55 - 0.47 * f, 0.08);
   return (elapsed % period) < period * 0.35;
 }
@@ -1393,6 +1605,607 @@ function explodeTNT(t) {
   }
 }
 
+/* ============================================================
+   V3 ARSENAL — 9 new weapons ported from the old Big Ben game.
+   All auto-ignite (kid-first: no right-click anywhere). New weapons
+   share the radialBlast helper below; meteor/TNT keep their own
+   hand-tuned loops untouched.
+   ============================================================ */
+const WEAPON_SETS = { meteor: 1, tnt: 1, bomb: 1, nuke: 1, nova: 1, stone: 1, firecrate: 1 };
+
+// Shared radial blast for the v3 weapons. Skips other weapons' bodies
+// (no chain detonations — matches the TNT roadmap decision), applies
+// the blast => instant vehicle explosion rule and severs nearby Eye
+// cables like every other blast does.
+function radialBlast(x, y, o) {
+  for (let k = 0; k < LB.bodies.length; k++) {
+    const b = LB.bodies[k];
+    if (b.isStatic || !b.plugin.lb) continue;
+    const lb = b.plugin.lb;
+    if (lb.removed || WEAPON_SETS[lb.set]) continue;
+    const d = dist(b.position.x, b.position.y, x, y);
+    if (lb.set === 'vehicle') {
+      if (d < o.vehCore) { const veh = vehicleByBody(b); if (veh) explodeVehicle(veh); }
+      continue;
+    }
+    if (d < o.core) {
+      removeBody(b, {});
+    } else if (d < o.push) {
+      const f = 1 - d / o.push;
+      const ux = (b.position.x - x) / (d || 1), uy = (b.position.y - y) / (d || 1);
+      M.Sleeping.set(b, false);
+      M.Body.setVelocity(b, {
+        x: b.velocity.x + ux * f * o.fling,
+        y: b.velocity.y + uy * f * o.fling - f * o.lift
+      });
+      M.Body.setAngularVelocity(b, b.angularVelocity + (Math.random() - 0.5) * 0.25 * f);
+    }
+  }
+  if (o.cutR) {
+    for (let ci = LB.constraints.length - 1; ci >= 0; ci--) {
+      const c = LB.constraints[ci];
+      const ax = c.bodyA ? c.bodyA.position.x + c.pointA.x : c.pointA.x;
+      const ay = c.bodyA ? c.bodyA.position.y + c.pointA.y : c.pointA.y;
+      const bx = c.bodyB ? c.bodyB.position.x + c.pointB.x : c.pointB.x;
+      const by = c.bodyB ? c.bodyB.position.y + c.pointB.y : c.pointB.y;
+      if (dist((ax + bx) / 2, (ay + by) / 2, x, y) < o.cutR) {
+        M.Composite.remove(world, c);
+        LB.constraints.splice(ci, 1);
+        LB.events.brokenConstraints++;
+        P.sparkle((ax + bx) / 2, (ay + by) / 2, 5);
+      }
+    }
+  }
+}
+
+/* The nuke's wipe: every active effect ends right now (the old game's
+   _detonate_nuclear_bomb cleared each effect list; audio loops stop). */
+function clearAllEffects() {
+  let i;
+  for (i = LB.tornados.length - 1; i >= 0; i--) LB.audio.rumbleStop(LB.tornados[i]);
+  LB.tornados.length = 0;
+  for (i = LB.tnts.length - 1; i >= 0; i--) LB.audio.fuseStop(LB.tnts[i]);
+  LB.tnts.length = 0;
+  for (i = LB.bombs.length - 1; i >= 0; i--) LB.audio.fuseStop(LB.bombs[i]);
+  LB.bombs.length = 0;
+  LB.holes.length = 0;
+  for (i = LB.lasers.length - 1; i >= 0; i--) LB.audio.laserHumStop(LB.lasers[i]);
+  LB.lasers.length = 0;
+  LB.tsunamis.length = 0;
+  for (i = LB.vortices.length - 1; i >= 0; i--) LB.audio.swirlStop(LB.vortices[i]);
+  LB.vortices.length = 0;
+  for (i = LB.stones.length - 1; i >= 0; i--) LB.audio.rumbleStop(LB.stones[i]);
+  LB.stones.length = 0;
+  LB.fires.length = 0;
+  LB.novas.length = 0;
+  LB.novaRings.length = 0;
+  LB.meteors.length = 0;
+  LB.rockets.length = 0;
+}
+
+/* ---------------- BOMB 💣 — round black bomb, 2 s auto-fuse ---------------- */
+const BOMB_R = 22, BOMB_FUSE = 2.0;
+function spawnBomb(x, y) {
+  const b = M.Bodies.circle(x, y, BOMB_R, {
+    friction: 0.5, frictionStatic: 0.8, restitution: 0.18,
+    density: 0.006, frictionAir: 0.008, sleepThreshold: 60, label: 'bomb'
+  });
+  tag(b, 'bomb', 'bomb');
+  b.plugin.lb.color = '#17171d';
+  M.Composite.add(world, b);
+  const t = { body: b, t: 0, dur: BOMB_FUSE, on: true, audio: null };
+  LB.bombs.push(t);
+  LB.audio.fuseStart(t);
+  P.dustPuff(x, y, 0, -0.4, 22, 0.3);
+  return t;
+}
+function explodeBomb(t) {
+  LB.audio.fuseStop(t);
+  t.on = false;
+  const b = t.body;
+  if (!b.plugin.lb || b.plugin.lb.removed) return;
+  const x = b.position.x, y = b.position.y;
+  removeBody(b, { silent: true });
+  LB.flash = Math.min(LB.flash + 0.6, 1);
+  LB.shake = Math.min(LB.shake + 20, 55);
+  LB.events.explosions++;
+  LB.events.shakes++;
+  LB.audio.boomDeep(1);
+  P.ring(x, y, 12, 4);
+  P.ring(x, y, 7, 2, 'rgba(255,190,110,0.7)');
+  P.embers(x, y, 34);
+  P.sparks(x, y, 26, SPR.glow.gold, 8);
+  P.smoke(x, y, 12, true);
+  radialBlast(x, y, { core: 60, push: 310, vehCore: 95, fling: 15, lift: 5, cutR: 66 });
+  if (y > GROUND_Y - 100) {
+    LB.decals.push({ x: x, y: Math.min(y, GROUND_Y + 8), size: rand(60, 90), alpha: 0.5 });
+    if (LB.decals.length > 14) LB.decals.shift();
+  }
+}
+
+/* ---------------- TNT BEN 🧱 — 3-block TNT tower, 1.5 s fuse, 3x strength ---------------- */
+function spawnTntBen(x, y) {
+  const partOpts = {
+    friction: 0.6, frictionStatic: 0.9, restitution: 0.05,
+    density: 0.004, frictionAir: 0.01, sleepThreshold: 60, label: 'tnt'
+  };
+  const parts = [];
+  for (let i = 0; i < 3; i++) {
+    parts.push(M.Bodies.rectangle(x, y + TNT_SIZE - i * TNT_SIZE, TNT_SIZE, TNT_SIZE, partOpts));
+  }
+  const b = M.Body.create({ parts: parts });
+  tag(b, 'tnt', 'tnt_ben');
+  b.plugin.lb.color = '#d5442c';
+  const rng = mulberry32(90100 + ((++tntSeq) * 7919) % 65536);
+  const specks = [];
+  for (let p = 0; p < 3; p++) {
+    const hh = TNT_SIZE / 2, speck = [];
+    for (let k = 0; k < 7; k++) {
+      speck.push([-hh + 3 + rng() * (TNT_SIZE - 6), -hh + 2 + rng() * 7, rng() < 0.5]);
+      speck.push([-hh + 3 + rng() * (TNT_SIZE - 6), hh - 2 - rng() * 7, rng() < 0.5]);
+    }
+    specks.push(speck);
+  }
+  b.plugin.lb.specks = specks;
+  M.Composite.add(world, b);
+  const t = { id: tntSeq, body: b, t: 0, dur: 1.5, ben: true, on: true, audio: null };
+  LB.tnts.push(t);
+  LB.events.tntPlaced++;
+  LB.audio.fuseStart(t);
+  P.dustPuff(x, y, 0, -0.5, 30, 0.35);
+  P.sparks(x, y - TNT_SIZE * 1.5, 8, SPR.glow.gold, 4);
+  return t;
+}
+
+/* ---------------- NOVA 🌟 — 3 s charge, then a huge colorful blast ---------------- */
+const NOVA_R = 30, NOVA_FUSE = 3.0;
+const NOVA_COLS = ['red', 'orange', 'gold', 'green', 'blue', 'purple'];
+function spawnNova(x, y) {
+  const b = M.Bodies.circle(x, y, NOVA_R, {
+    friction: 0.9, frictionStatic: 1, restitution: 0.04,
+    density: 0.009, frictionAir: 0.01, sleepThreshold: 60, label: 'nova'
+  });
+  tag(b, 'nova', 'nova');
+  b.plugin.lb.color = '#ffd76b';
+  M.Composite.add(world, b);
+  const t = { body: b, t: 0, dur: NOVA_FUSE, on: true };
+  LB.novas.push(t);
+  LB.audio.novaCharge(NOVA_FUSE);
+  return t;
+}
+function explodeNova(t) {
+  t.on = false;
+  const b = t.body;
+  if (!b.plugin.lb || b.plugin.lb.removed) return;
+  const x = b.position.x, y = b.position.y;
+  removeBody(b, { silent: true });
+  LB.flash = Math.min(LB.flash + 0.95, 1);
+  LB.shake = Math.min(LB.shake + 34, 55);
+  LB.events.explosions++;
+  LB.events.shakes++;
+  LB.audio.novaBoom();
+  // two-stage impact like the old nova: full force, then an echo at ~0.62 r / 0.78 d
+  radialBlast(x, y, { core: 190, push: 830, vehCore: 210, fling: 34, lift: 12, cutR: 150 });
+  radialBlast(x, y, { core: 118, push: 515, vehCore: 130, fling: 26, lift: 9, cutR: 0 });
+  // 90+ colorful particles (palette red/orange/gold/green/blue/purple)
+  for (let k = 0; k < 96; k++) {
+    const a = Math.random() * Math.PI * 2, v = rand(3, 17);
+    P.spawn('spark', x, y, {
+      vx: Math.cos(a) * v, vy: Math.sin(a) * v - 2,
+      life: rand(0.6, 1.7), size: rand(4, 9), drag: 0.955, grav: 0.05,
+      spr: SPR.glow[NOVA_COLS[k % NOVA_COLS.length]]
+    });
+  }
+  P.ring(x, y, 20, 6);
+  P.ring(x, y, 13, 4, 'rgba(255,220,150,0.8)');
+  LB.novaRings.push({ x: x, y: y, t: 0, dur: 1.9, hue: Math.random() * 360 });
+  if (y > GROUND_Y - 120) {
+    LB.decals.push({ x: x, y: Math.min(y, GROUND_Y + 8), size: rand(120, 170), alpha: 0.55 });
+    if (LB.decals.length > 14) LB.decals.shift();
+  }
+}
+
+/* ---------------- NUKE ☢️ — siren ~2.5 s, then the wipe ---------------- */
+const NUKE_SIZE = 56, NUKE_FUSE = 2.5;
+function spawnNuke(x, y) {
+  const b = M.Bodies.rectangle(x, y, NUKE_SIZE, NUKE_SIZE, {
+    friction: 0.6, frictionStatic: 0.9, restitution: 0.03,
+    density: 0.006, frictionAir: 0.01, sleepThreshold: 60, label: 'nuke'
+  });
+  tag(b, 'nuke', 'nuke');
+  b.plugin.lb.color = '#8a8f98';
+  M.Composite.add(world, b);
+  const t = { body: b, t: 0, dur: NUKE_FUSE, on: true };
+  LB.nukes.push(t);
+  LB.audio.sirenWail(NUKE_FUSE);
+  P.dustPuff(x, y, 0, -0.5, 34, 0.35);
+  return t;
+}
+function explodeNuke(t) {
+  t.on = false;
+  const b = t.body;
+  if (!b.plugin.lb || b.plugin.lb.removed) return;
+  const x = b.position.x, y = b.position.y;
+  removeBody(b, { silent: true });
+  clearAllEffects();          // the wipe: no meteor / tornado / laser / ... survives it
+  LB.flash = 1;               // full-screen white
+  LB.shake = 55;
+  LB.events.explosions++;
+  LB.events.shakes++;
+  LB.audio.nukeBoom();
+  radialBlast(x, y, { core: 300, push: 1500, vehCore: 340, fling: 46, lift: 20, cutR: 430 });
+  P.ring(x, y, 34, 10);
+  P.ring(x, y, 22, 6, 'rgba(255,200,120,0.85)');
+  P.ring(x, y, 14, 4, 'rgba(255,240,200,0.9)');
+  // hot debris fan rising from the fireball
+  for (let k = 0; k < 130; k++) {
+    const a = -Math.PI / 2 + rand(-1.1, 1.1);
+    const v = rand(8, 26);
+    P.spawn('spark', x, y, {
+      vx: Math.cos(a) * v, vy: Math.sin(a) * v,
+      life: rand(0.7, 2.0), size: rand(5, 11), drag: 0.97, grav: 0.06,
+      spr: k % 3 === 0 ? SPR.glow.white : (k % 3 === 1 ? SPR.glow.orange : SPR.glow.gold)
+    });
+  }
+  P.smoke(x, y, 26, true);
+  LB.mushrooms.push({ x: x, y: Math.min(y, GROUND_Y), t: 0, dur: 3.8 });
+  LB.decals.push({ x: x, y: Math.min(y, GROUND_Y + 8), size: 220, alpha: 0.6 });
+  if (LB.decals.length > 14) LB.decals.shift();
+}
+
+/* ---------------- TSUNAMI 🌊 — wall of water from the left edge ---------------- */
+function tsunamiSurfaceY(w, x) {
+  const k = clamp((w.front - x) / w.width, 0, 1); // 0 at the crest, 1 at the tail
+  const env = k < 0.3 ? 1 : 1 - ((k - 0.3) / 0.7) * 0.6;
+  return GROUND_Y - w.height * env;
+}
+function spawnTsunami() {
+  const w = { front: -240, width: 480, height: 500, speed: 450, t: 0, phase: Math.random() * 10, on: true };
+  LB.tsunamis.push(w);
+  LB.audio.splash();
+  LB.audio.waterRush(4.2);
+  return w;
+}
+function stepTsunamis(dts) {
+  for (let i = LB.tsunamis.length - 1; i >= 0; i--) {
+    const w = LB.tsunamis[i];
+    w.t += dts;
+    w.front += w.speed * dts;
+    const left = w.front - w.width;
+    if (left > W + 160) { w.on = false; LB.tsunamis.splice(i, 1); continue; }
+    const frontBand = Math.max(60, w.width * 0.18);
+    let grind = 2; // blocks the wave face may smash per step (FPS + drama cap)
+    for (let k = 0; k < LB.bodies.length; k++) {
+      const o = LB.bodies[k];
+      if (o.isStatic || !o.plugin.lb || o.plugin.lb.removed) continue;
+      const lb = o.plugin.lb;
+      const bx = o.position.x;
+      if (bx < left - 40 || bx > w.front + 40) continue;
+      if (o.position.y < tsunamiSurfaceY(w, bx) - 12) continue;
+      if (lb.set === 'vehicle') {
+        if (lb.state === 'drive') {
+          const veh = vehicleByBody(o);
+          if (veh) flingVehicle(veh, w.front - 200);
+          LB.audio.splash();
+        }
+        continue;
+      }
+      if (WEAPON_SETS[lb.set]) continue;
+      const depth = Math.min(1, (o.position.y - tsunamiSurfaceY(w, bx)) / w.height + 0.4);
+      const frontF = bx >= w.front - frontBand ? 1 : 0.55;
+      M.Sleeping.set(o, false);
+      M.Body.setVelocity(o, {
+        x: Math.min(o.velocity.x + 0.55 * depth * frontF, 12),
+        y: o.velocity.y - 0.26 * depth
+      });
+      // the wave face grinds whatever it hits near the ground
+      if (bx >= w.front - frontBand && o.position.y > GROUND_Y - 90 && grind > 0 && Math.random() < 0.22) {
+        grind--;
+        P.splash(bx, GROUND_Y - 8, 8);
+        removeBody(o, {});
+      }
+    }
+    // foam + spray on the crest
+    if (stepCounter % 2 === 0) {
+      for (let s = 0; s < 3; s++) {
+        const fx = w.front - rand(0, w.width * 0.4);
+        P.splash(fx, tsunamiSurfaceY(w, fx), 3);
+      }
+      P.dustPuff(w.front - 30, GROUND_Y - w.height * 0.55, 4, -2, rand(30, 55), 0.25);
+    }
+    if (LB.audio.throttle('tsun', 240)) LB.audio.splash();
+  }
+}
+
+/* ---------------- LASER ⚡ — horizontal cutting beam across the screen ---------------- */
+const LASER_DUR = 1.5, LASER_SPEED = 1350, LASER_HALF = 7;
+function spawnLaser(wx, wy) {
+  const fromLeft = !isFinite(wx) || wx < W / 2;
+  const y = clamp(isFinite(wy) ? wy : H * 0.45, 40, GROUND_Y - 14);
+  const beam = { y: y, dir: fromLeft ? 1 : -1, head: fromLeft ? 0 : W, t: 0, dur: LASER_DUR, on: true, audio: null };
+  LB.lasers.push(beam);
+  LB.audio.laserHumStart(beam);
+  return beam;
+}
+function stepLasers(dts) {
+  for (let i = LB.lasers.length - 1; i >= 0; i--) {
+    const bm = LB.lasers[i];
+    bm.t += dts;
+    bm.head += bm.dir * LASER_SPEED * dts;
+    if (bm.t >= bm.dur || (bm.dir > 0 ? bm.head > W + 60 : bm.head < -60)) {
+      bm.on = false;
+      LB.audio.laserHumStop(bm);
+      LB.lasers.splice(i, 1);
+      continue;
+    }
+    const x0 = bm.dir > 0 ? 0 : bm.head;
+    const x1 = bm.dir > 0 ? bm.head : W;
+    for (let k = 0; k < LB.bodies.length; k++) {
+      const o = LB.bodies[k];
+      if (o.isStatic || !o.plugin.lb || o.plugin.lb.removed) continue;
+      const lb = o.plugin.lb;
+      if (WEAPON_SETS[lb.set]) continue;
+      const bb = o.bounds;
+      if (bb.max.y < bm.y - LASER_HALF || bb.min.y > bm.y + LASER_HALF) continue;
+      if (bb.max.x < x0 || bb.min.x > x1) continue;
+      M.Sleeping.set(o, false);
+      const hx = clamp(o.position.x, x0, x1);
+      if (lb.set === 'vehicle') {
+        lb.laserDmg = (lb.laserDmg || 0) + 160 * dts;
+        if (stepCounter % 2 === 0) P.sparks(hx, bm.y, 3, SPR.glow.cyan, 6);
+        if (lb.laserDmg > 60) { const veh = vehicleByBody(o); if (veh) explodeVehicle(veh); }
+        continue;
+      }
+      lb.laserDmg = (lb.laserDmg || 0) + 95 * dts;
+      // the beam shoves the cut lightly along its direction
+      M.Body.setVelocity(o, { x: o.velocity.x + bm.dir * 0.35, y: o.velocity.y });
+      if (stepCounter % 3 === 0) P.sparks(hx, bm.y, 2, SPR.glow.cyan, 5);
+      if (lb.laserDmg > 42) {
+        removeBody(o, {});
+        P.sparks(hx, bm.y, 8, SPR.glow.white, 7);
+        LB.audio.sizzle();
+      }
+    }
+    LB.audio.sizzle();
+    if (stepCounter % 4 === 0) {
+      // travelling tip flare
+      P.spawn('spark', bm.head, bm.y, { vx: bm.dir * 2, vy: rand(-1, 1), life: 0.3, size: rand(4, 8), drag: 0.9, spr: SPR.glow.cyan });
+    }
+  }
+}
+
+/* ---------------- ROLLING STONE 🪨 — boulder from the left, crushes traffic ---------------- */
+const STONE_R = 105, STONE_SPEED = 14.5, STONE_HP = 300;
+function stoneByBody(b) {
+  for (let i = 0; i < LB.stones.length; i++) {
+    if (LB.stones[i].body === b) return LB.stones[i];
+  }
+  return null;
+}
+function spawnStone() {
+  const b = M.Bodies.circle(-STONE_R - 40, GROUND_Y - STONE_R - 2, STONE_R, {
+    friction: 1.0, frictionStatic: 1, restitution: 0.02,
+    density: 0.02, frictionAir: 0.001, sleepThreshold: 400, label: 'stone'
+  });
+  tag(b, 'stone', 'stone');
+  b.plugin.lb.color = '#8d8797';
+  b.plugin.lb.stoneHp = STONE_HP;
+  // fixed speckle pattern for the painter (stable across frames — no flicker)
+  const rng = mulberry32(5150 + LB.stones.length * 977);
+  const spots = [];
+  for (let k = 0; k < 14; k++) {
+    const a = rng() * Math.PI * 2, rr = rng() * STONE_R * 0.72;
+    spots.push([Math.cos(a) * rr, Math.sin(a) * rr, 4 + rng() * 9, rng() < 0.5]);
+  }
+  b.plugin.lb.spots = spots;
+  M.Composite.add(world, b);
+  const st = { body: b, t: 0, stuck: 0, on: true, audio: null };
+  LB.stones.push(st);
+  M.Sleeping.set(b, false);
+  M.Body.setVelocity(b, { x: STONE_SPEED, y: 0 });
+  M.Body.setAngularVelocity(b, STONE_SPEED / STONE_R);
+  LB.audio.rumbleStart(st);
+  P.dustPuff(30, GROUND_Y - 16, 4, -2, 44, 0.35);
+  return st;
+}
+function breakStone(st) {
+  LB.audio.rumbleStop(st);
+  st.on = false;
+  const i = LB.stones.indexOf(st);
+  if (i >= 0) LB.stones.splice(i, 1);
+  const b = st.body;
+  if (!b.plugin.lb || b.plugin.lb.removed) return;
+  const x = b.position.x, y = b.position.y;
+  removeBody(b, { silent: true });
+  LB.shake = Math.min(LB.shake + 22, 55);
+  LB.events.explosions++;
+  LB.audio.burst();
+  LB.audio.boom(0.7);
+  P.debrisBurst(x, y, '#9a94a4', 26);
+  P.debrisBurst(x, y - 34, '#7d7787', 18);
+  P.smoke(x, y, 14, true);
+  for (let k = 0; k < 5; k++) {
+    P.dustPuff(x + rand(-60, 60), GROUND_Y - rand(0, 30), rand(-3, 3), -rand(1, 3), rand(30, 60), 0.35);
+  }
+  P.sparks(x, y, 20, SPR.glow.gold, 6);
+}
+function stepStones(dts) {
+  for (let i = LB.stones.length - 1; i >= 0; i--) {
+    const st = LB.stones[i], b = st.body;
+    st.t += dts;
+    if (!b.plugin.lb || b.plugin.lb.removed ||
+        !isFinite(b.position.x) || !isFinite(b.position.y)) {
+      breakStone(st);
+      continue;
+    }
+    const sp = Math.abs(b.velocity.x);
+    // initial charge: hold the launch speed until it meets real resistance
+    if (st.t < 1.6 && sp > 0.5 && sp < STONE_SPEED) {
+      M.Body.setVelocity(b, { x: Math.min(sp + 0.3, STONE_SPEED), y: b.velocity.y });
+      M.Body.setAngularVelocity(b, b.velocity.x / STONE_R);
+    }
+    if (sp < 0.6) st.stuck += dts; else st.stuck = 0;
+    if (st.stuck > 1.4 || b.position.x > W + 220 || b.position.y > WATER_Y + 30) {
+      breakStone(st);
+      continue;
+    }
+    // rumble volume rides the speed
+    if (st.audio && st.audio.g) {
+      try { st.audio.g.gain.value = clamp(0.08 + sp * 0.02, 0.08, 0.34); } catch (e) {}
+    }
+    // dust kicked up behind the roll
+    if (stepCounter % 2 === 0 && sp > 2) {
+      P.dustPuff(b.position.x - sp * 2.2, GROUND_Y - rand(2, 18), -sp * 0.12, -rand(0.5, 2.5), rand(14, 32), 0.3);
+    }
+  }
+}
+
+/* ---------------- VORTEX 🌀 — water whirlpool on the spot, 5 s ---------------- */
+const VORTEX_DUR = 5.0;
+function spawnVortex(wx) {
+  const t = {
+    x: clamp(isFinite(wx) ? wx : W / 2, 140, W - 140),
+    y: GROUND_Y, t: 0, dur: VORTEX_DUR, phase: Math.random() * 10, on: true, audio: null
+  };
+  LB.vortices.push(t);
+  LB.audio.swirlStart(t);
+  LB.audio.splash();
+  return t;
+}
+function stepVortices(dts) {
+  for (let i = LB.vortices.length - 1; i >= 0; i--) {
+    const v = LB.vortices[i];
+    v.t += dts;
+    if (v.t > v.dur) {
+      v.on = false;
+      LB.audio.swirlStop(v);
+      LB.vortices.splice(i, 1);
+      continue;
+    }
+    const fade = Math.min(1, v.t * 2.5, (v.dur - v.t) * 1.5);
+    for (let k = 0; k < LB.bodies.length; k++) {
+      const o = LB.bodies[k];
+      if (o.isStatic || !o.plugin.lb || o.plugin.lb.removed) continue;
+      const lb = o.plugin.lb;
+      const dx = v.x - o.position.x, dy = v.y - o.position.y;
+      const r = Math.sqrt(dx * dx + dy * dy);
+      if (r > 430 || o.position.y < GROUND_Y - 360) continue;
+      if (lb.set === 'vehicle') {
+        if (lb.state === 'drive') {
+          if (r < 180) { const veh = vehicleByBody(o); if (veh) flingVehicle(veh, v.x); }
+          continue;
+        }
+        // flung vehicles are dragged like free debris (fall through)
+      } else if (WEAPON_SETS[lb.set]) continue;
+      const d = Math.max(r, 42);
+      let acc = 105 / (d * d);
+      if (acc > 0.010) acc = 0.010;
+      const ux = dx / (r || 1), uy = dy / (r || 1);
+      M.Sleeping.set(o, false);
+      // pull to the centre + a strong swirl — down it goes
+      M.Body.applyForce(o, o.position, {
+        x: (ux + -uy * 0.95) * acc * fade * o.mass,
+        y: (uy * 0.6 + ux * 0.95) * acc * fade * o.mass
+      });
+      const bs = Math.max(o.bounds.max.x - o.bounds.min.x, o.bounds.max.y - o.bounds.min.y) * 0.3;
+      if (r < 44 + bs) {
+        if (lb.set === 'vehicle') {
+          const veh = vehicleByBody(o);
+          if (veh) explodeVehicle(veh);
+        } else {
+          removeBody(o, { consume: false });
+          P.splash(o.position.x, GROUND_Y - 8, 8);
+          LB.events.consumed++;
+          LB.audio.consume();
+        }
+      }
+    }
+    // spray: water flung up the spiral walls
+    if (stepCounter % 2 === 0) {
+      const a = Math.random() * Math.PI * 2, rr = rand(40, 150);
+      P.spawn('splash', v.x + Math.cos(a) * rr, GROUND_Y - rand(0, 20), {
+        vx: -Math.sin(a) * rand(2, 6), vy: -rand(2, 8),
+        life: rand(0.4, 0.9), size: rand(2.5, 5), grav: 0.18, drag: 0.97, spr: SPR.glow.cyan, a: 0.8
+      });
+    }
+  }
+}
+
+/* ---------------- FIRE 🔥 (old TRIANGEL) — pyre crate -> spreading fire wave ---------------- */
+const FIRE_SPREAD = 400, FIRE_DUR = 4.2;
+function spawnFire(x) {
+  const b = M.Bodies.polygon(x, GROUND_Y - 15, 3, 17, {
+    friction: 0.7, frictionStatic: 1, restitution: 0.05,
+    density: 0.004, frictionAir: 0.01, sleepThreshold: 60, label: 'firecrate'
+  });
+  tag(b, 'firecrate', 'firecrate');
+  b.plugin.lb.color = '#c2402f';
+  M.Composite.add(world, b);
+  const f = { x: x, frontL: x, frontR: x, t: 0, dur: FIRE_DUR, state: 'crate', crate: b, on: true };
+  LB.fires.push(f);
+  return f;
+}
+function stepFires(dts) {
+  for (let i = LB.fires.length - 1; i >= 0; i--) {
+    const f = LB.fires[i];
+    f.t += dts;
+    if (f.state === 'crate') {
+      if (stepCounter % 2 === 0 && f.crate && !f.crate.plugin.lb.removed) {
+        P.flame(f.crate.position.x + rand(-7, 7), f.crate.position.y - 8, rand(-0.4, 0.4), -rand(1.2, 2.6));
+      }
+      if (f.t >= 0.45 || !f.crate || f.crate.plugin.lb.removed) {
+        f.state = 'wave';
+        f.t = 0;
+        if (f.crate && !f.crate.plugin.lb.removed) {
+          P.embers(f.crate.position.x, f.crate.position.y, 14);
+          removeBody(f.crate, { silent: true });
+        }
+        f.crate = null;
+        LB.audio.boomDeep(0.35);
+        LB.audio.crackle(10);
+      }
+      continue;
+    }
+    f.frontL -= FIRE_SPREAD * dts;
+    f.frontR += FIRE_SPREAD * dts;
+    if (f.t > f.dur || (f.frontL < -180 && f.frontR > W + 180)) {
+      f.on = false;
+      LB.fires.splice(i, 1);
+      continue;
+    }
+    for (let k = 0; k < LB.bodies.length; k++) {
+      const o = LB.bodies[k];
+      if (o.isStatic || !o.plugin.lb || o.plugin.lb.removed) continue;
+      const lb = o.plugin.lb;
+      if (o.position.y < GROUND_Y - 95) continue;
+      if (o.position.x < f.frontL - 30 || o.position.x > f.frontR + 30) continue;
+      if (WEAPON_SETS[lb.set]) continue;
+      if (lb.set === 'vehicle') {
+        if (lb.state !== 'drive') continue;
+        lb.fireDmg = (lb.fireDmg || 0) + 110 * dts;
+        if (stepCounter % 4 === 0) P.flame(o.position.x + rand(-14, 14), o.position.y - 6, rand(-0.5, 0.5), -rand(1.5, 3));
+        if (lb.fireDmg > 55) { const veh = vehicleByBody(o); if (veh) explodeVehicle(veh); }
+        continue;
+      }
+      const wasCold = !lb.fireDmg;
+      lb.fireDmg = (lb.fireDmg || 0) + 70 * dts;
+      if (wasCold) M.Sleeping.set(o, false); // burned blocks start to sway
+      if (stepCounter % 6 === 0) P.flame(o.position.x + rand(-8, 8), o.position.y, rand(-0.3, 0.3), -rand(1, 2.4));
+      if (lb.fireDmg > 48) {
+        removeBody(o, {});
+        P.embers(o.position.x, o.position.y, 8);
+      }
+    }
+    // travelling flame fronts
+    if (stepCounter % 2 === 0) {
+      P.flame(f.frontL + rand(-12, 12), GROUND_Y - rand(0, 18), rand(-0.7, 0.2), -rand(1.2, 3));
+      P.flame(f.frontR + rand(-12, 12), GROUND_Y - rand(0, 18), rand(-0.2, 0.7), -rand(1.2, 3));
+      if (Math.random() < 0.6) P.flame(rand(f.frontL, f.frontR), GROUND_Y - rand(0, 14), rand(-0.3, 0.3), -rand(1, 2.2));
+    }
+    if (LB.audio.throttle('fire', 300)) LB.audio.crackle(2);
+  }
+}
+
 /* ---------------- per-step weapon forces ---------------- */
 function stepWeapons(dt) {
   const dts = dt / 1000;
@@ -1411,8 +2224,9 @@ function stepWeapons(dt) {
     t.t += dts;
     // fuse sparks from the block's (rotated) top centre
     if (stepCounter % 2 === 0) {
-      const px = b.position.x + (TNT_SIZE / 2) * Math.sin(b.angle);
-      const py = b.position.y - (TNT_SIZE / 2) * Math.cos(b.angle);
+      const topOff = t.ben ? TNT_SIZE * 1.5 : TNT_SIZE / 2;
+      const px = b.position.x + topOff * Math.sin(b.angle);
+      const py = b.position.y - topOff * Math.cos(b.angle);
       P.spawn('spark', px + rand(-3, 3), py, {
         vx: rand(-0.8, 0.8), vy: rand(-2.2, -0.6), life: rand(0.2, 0.5),
         size: rand(2, 4.5), drag: 0.94, grav: 0.06,
@@ -1571,6 +2385,89 @@ function stepWeapons(dt) {
       P.dustPuff(t.x + Math.cos(a) * r, GROUND_Y - rand(0, 30), Math.cos(a) * 1.5, -rand(2, 6), rand(20, 40), 0.25);
     }
   }
+
+  /* ---------------- v3 arsenal ---------------- */
+  // bombs: fuse + sizzle sparks at the (rotated) fuse tip
+  for (let i = LB.bombs.length - 1; i >= 0; i--) {
+    const t = LB.bombs[i], b = t.body;
+    if (!b.plugin.lb || b.plugin.lb.removed ||
+        !isFinite(b.position.x) || !isFinite(b.position.y)) {
+      LB.audio.fuseStop(t);
+      LB.bombs.splice(i, 1);
+      continue;
+    }
+    t.t += dts;
+    if (stepCounter % 2 === 0) {
+      const tipX = 12, tipY = -BOMB_R - 10;
+      const px = b.position.x + tipX * Math.cos(b.angle) - tipY * Math.sin(b.angle);
+      const py = b.position.y + tipX * Math.sin(b.angle) + tipY * Math.cos(b.angle);
+      P.spawn('spark', px, py, {
+        vx: rand(-0.8, 0.8), vy: rand(-2.4, -0.8), life: rand(0.2, 0.5),
+        size: rand(2, 4.5), drag: 0.94, grav: 0.06,
+        spr: Math.random() < 0.7 ? SPR.glow.gold : SPR.glow.white
+      });
+    }
+    if (t.t >= t.dur) {
+      LB.bombs.splice(i, 1);
+      explodeBomb(t);
+    }
+  }
+  // novas charging: gathering smoke + sparkles
+  for (let i = LB.novas.length - 1; i >= 0; i--) {
+    const t = LB.novas[i], b = t.body;
+    if (!b.plugin.lb || b.plugin.lb.removed || !isFinite(b.position.x)) {
+      t.on = false;
+      LB.novas.splice(i, 1);
+      continue;
+    }
+    t.t += dts;
+    if (stepCounter % 3 === 0) {
+      P.spawn('smoke', b.position.x + rand(-16, 16), b.position.y + rand(-12, 10), {
+        vx: rand(-0.4, 0.4), vy: rand(-1.2, -0.3), life: rand(1.2, 2.4), size: rand(10, 20), grow: 10, a: 0.3
+      });
+    }
+    if (stepCounter % 2 === 0) {
+      P.crackleSpark(b.position.x + rand(-30, 30), b.position.y + rand(-30, 30),
+        Math.random() < 0.5 ? SPR.glow.gold : SPR.glow.white);
+    }
+    if (t.t >= t.dur) {
+      LB.novas.splice(i, 1);
+      explodeNova(t);
+    }
+  }
+  // nova shockwave rings (visual only)
+  for (let i = LB.novaRings.length - 1; i >= 0; i--) {
+    const r = LB.novaRings[i];
+    r.t += dts;
+    if (r.t > r.dur) LB.novaRings.splice(i, 1);
+  }
+  // nukes: siren fuse
+  for (let i = LB.nukes.length - 1; i >= 0; i--) {
+    const t = LB.nukes[i], b = t.body;
+    if (!b.plugin.lb || b.plugin.lb.removed ||
+        !isFinite(b.position.x) || !isFinite(b.position.y)) {
+      t.on = false;
+      LB.nukes.splice(i, 1);
+      continue;
+    }
+    t.t += dts;
+    if (stepCounter % 4 === 0) P.sparks(b.position.x, b.position.y - NUKE_SIZE / 2, 1, SPR.glow.red, 3);
+    if (t.t >= t.dur) {
+      LB.nukes.splice(i, 1);
+      explodeNuke(t);
+    }
+  }
+  // mushroom visuals
+  for (let i = LB.mushrooms.length - 1; i >= 0; i--) {
+    const m = LB.mushrooms[i];
+    m.t += dts;
+    if (m.t > m.dur) LB.mushrooms.splice(i, 1);
+  }
+  stepTsunamis(dts);
+  stepLasers(dts);
+  stepStones(dts);
+  stepVortices(dts);
+  stepFires(dts);
 }
 
 /* ---------------- Eye idle rotation + constraint stress ---------------- */
@@ -1699,6 +2596,27 @@ M.Events.on(engine, 'collisionStart', function (ev) {
       if (rvv > 6.5) {
         const veh = vehicleByBody(vLb === la ? A : B);
         if (veh) { explodeVehicle(veh); continue; }
+      }
+    }
+    // ROLLING STONE: crushes any vehicle it touches, loses armor grinding masonry
+    const stLb = (la && la.set === 'stone') ? la : (lbb && lbb.set === 'stone' ? lbb : null);
+    if (stLb) {
+      const stBody = stLb === la ? A : B;
+      const other = stLb === la ? B : A;
+      const st = stoneByBody(stBody);
+      if (st) {
+        const oLb = other.plugin.lb;
+        if (oLb && oLb.set === 'vehicle') {
+          const veh = vehicleByBody(other);
+          if (veh) explodeVehicle(veh);
+          stBody.plugin.lb.stoneHp -= 8;
+          LB.shake = Math.min(LB.shake + 6, 55);
+        } else if (oLb && (oLb.set === 'tower' || oLb.set === 'eye')) {
+          stBody.plugin.lb.stoneHp -= 3;
+        } else {
+          stBody.plugin.lb.stoneHp -= 1;
+        }
+        if (stBody.plugin.lb.stoneHp <= 0) breakStone(st);
       }
     }
     const rv = Math.sqrt((A.velocity.x - B.velocity.x) ** 2 + (A.velocity.y - B.velocity.y) ** 2);
@@ -1859,12 +2777,13 @@ function destroyAll() {
 }
 
 function resetWorld() {
-  for (let i = LB.tornados.length - 1; i >= 0; i--) LB.audio.rumbleStop(LB.tornados[i]);
-  for (let i = LB.tnts.length - 1; i >= 0; i--) LB.audio.fuseStop(LB.tnts[i]);
+  clearAllEffects();   // stops every weapon loop (fuses, rumbles, hums, swirls)
   M.Composite.clear(world, false, true);
   LB.constraints = [];
   LB.meteors = []; LB.holes = []; LB.tornados = []; LB.rockets = [];
   LB.tnts = [];
+  LB.bombs = []; LB.novas = []; LB.novaRings = []; LB.nukes = []; LB.mushrooms = [];
+  LB.tsunamis = []; LB.lasers = []; LB.stones = []; LB.vortices = []; LB.fires = [];
   LB.decals = [];
   LB.tower.bodies = []; LB.tower.clockBodies = []; LB.tower.lanternBodies = [];
   LB.tower.topBodies = []; LB.tower.total = 0;
@@ -1880,7 +2799,10 @@ function resetWorld() {
   LB.audio.brokenPlayed = false;
   LB.shake = 0; LB.flash = 0;
   LB.weaponFired.meteor = 0; LB.weaponFired.blackhole = 0; LB.weaponFired.tornado = 0;
-  LB.weaponFired.tnt = 0;
+  LB.weaponFired.tnt = 0; LB.weaponFired.bomb = 0; LB.weaponFired.tnt_ben = 0;
+  LB.weaponFired.nova = 0; LB.weaponFired.nuke = 0; LB.weaponFired.tsunami = 0;
+  LB.weaponFired.laser = 0; LB.weaponFired.stone = 0; LB.weaponFired.vortex = 0;
+  LB.weaponFired.fire = 0;
   LB.events.explosions = 0; LB.events.consumed = 0; LB.events.fireworks = 0;
   LB.events.brokenConstraints = 0; LB.events.shakes = 0; LB.events.splashes = 0;
   LB.events.tntPlaced = 0; LB.events.tntExploded = 0;
@@ -1955,27 +2877,114 @@ function hideHintSoon() {
   }
 }
 
-const WEAPONS = ['meteor', 'blackhole', 'tornado', 'tnt'];
+const WEAPONS = ['meteor', 'blackhole', 'tornado', 'tnt', 'bomb', 'tnt_ben', 'nova', 'nuke', 'tsunami', 'laser', 'stone', 'vortex', 'fire'];
+const WEAPON_META = {
+  meteor: { emo: '☄️', label: 'METEOR', col: 'rgba(255,170,80,0.95)' },
+  blackhole: { emo: '🕳️', label: 'BLACK HOLE', col: 'rgba(180,130,255,0.95)' },
+  tornado: { emo: '🌪️', label: 'TORNADO', col: 'rgba(120,220,255,0.95)' },
+  tnt: { emo: '🧨', label: 'TNT', col: 'rgba(255,110,80,0.95)' },
+  bomb: { emo: '💣', label: 'BOMB', col: 'rgba(210,210,225,0.95)' },
+  tnt_ben: { emo: '🧱', label: 'TNT BEN', col: 'rgba(255,120,90,0.95)' },
+  nova: { emo: '🌟', label: 'NOVA', col: 'rgba(255,230,120,0.95)' },
+  nuke: { emo: '☢️', label: 'NUKE', col: 'rgba(255,220,60,0.95)' },
+  tsunami: { emo: '🌊', label: 'TSUNAMI', col: 'rgba(90,190,255,0.95)' },
+  laser: { emo: '⚡', label: 'LASER', col: 'rgba(120,255,220,0.95)' },
+  stone: { emo: '🪨', label: 'STONE', col: 'rgba(190,180,200,0.95)' },
+  vortex: { emo: '🌀', label: 'VORTEX', col: 'rgba(110,220,255,0.95)' },
+  fire: { emo: '🔥', label: 'FIRE', col: 'rgba(255,150,70,0.95)' }
+};
 function selectWeapon(w) {
-  LB.weapon = w;
+  if (WEAPON_META[w]) LB.weapon = w;
   const btns = document.querySelectorAll('.wbtn');
   for (let i = 0; i < btns.length; i++) {
-    btns[i].classList.toggle('active', btns[i].getAttribute('data-w') === w);
+    btns[i].classList.toggle('active', btns[i].getAttribute('data-w') === LB.weapon);
   }
+  const meta = WEAPON_META[LB.weapon];
+  const emo = document.querySelector('#curWeapon .emo');
+  const lbl = document.querySelector('#curWeapon .lbl');
+  if (meta && emo) emo.textContent = meta.emo;
+  if (meta && lbl) lbl.textContent = meta.label;
 }
-document.querySelectorAll('.wbtn').forEach(function (btn) {
-  btn.addEventListener('pointerdown', function (e) {
+
+/* ---- weapon picker: full-screen grid; the whole sim (and its audio)
+   pauses while it is open, so the kid can choose calmly ---- */
+const pickerEl = document.getElementById('picker');
+function openPicker() {
+  if (LB.phase !== 'play' || LB.paused) return false;
+  LB.paused = true;
+  if (pickerEl) pickerEl.classList.remove('hidden');
+  if (LB.audio.ctx && LB.audio.ctx.state === 'running') {
+    LB.audio.ctx.suspend().catch(function () {});
+  }
+  LB.audio.pop();
+  return true;
+}
+function closePicker() {
+  if (!LB.paused) return false;
+  LB.paused = false;
+  if (pickerEl) pickerEl.classList.add('hidden');
+  if (LB.audio.ctx && LB.audio.ctx.state === 'suspended') {
+    LB.audio.ctx.resume().catch(function () {});
+  }
+  LB.audio.click();
+  return true;
+}
+function buildPicker() {
+  const grid = document.getElementById('pickerGrid');
+  if (!grid) return;
+  for (let i = 0; i < WEAPONS.length; i++) {
+    (function (w) {
+      const meta = WEAPON_META[w];
+      const card = document.createElement('button');
+      card.type = 'button';
+      card.className = 'wbtn wcard';
+      card.setAttribute('data-w', w);
+      const emo = document.createElement('span'); emo.className = 'emo'; emo.textContent = meta.emo;
+      const lbl = document.createElement('span'); lbl.className = 'lbl'; lbl.textContent = meta.label;
+      card.appendChild(emo); card.appendChild(lbl);
+      card.addEventListener('pointerdown', function (e) {
+        e.stopPropagation();
+        LB.audio.init(); LB.audio.resume();
+        selectWeapon(w);
+        closePicker();
+      });
+      grid.appendChild(card);
+    })(WEAPONS[i]);
+  }
+  const close = document.getElementById('pickerClose');
+  if (close) close.addEventListener('pointerdown', function (e) {
     e.stopPropagation();
     LB.audio.init(); LB.audio.resume();
-    selectWeapon(btn.getAttribute('data-w'));
+    closePicker();
   });
+}
+buildPicker();
+document.getElementById('curWeapon').addEventListener('pointerdown', function (e) {
+  e.stopPropagation();
+  LB.audio.init(); LB.audio.resume();
+  if (LB.paused) { closePicker(); return; }
+  openPicker();
 });
 window.addEventListener('keydown', function (e) {
-  if (e.key === '1') selectWeapon('meteor');
-  else if (e.key === '2') selectWeapon('blackhole');
-  else if (e.key === '3') selectWeapon('tornado');
-  else if (e.key === '4') selectWeapon('tnt');
-  else if (e.key === 'm' || e.key === 'M') toggleMute();
+  if (LB.paused) {
+    if (e.key === 'Escape' || e.key === 'Esc') closePicker();
+    return;
+  }
+  const k = e.key;
+  if (k === '1') selectWeapon('meteor');
+  else if (k === '2') selectWeapon('blackhole');
+  else if (k === '3') selectWeapon('tornado');
+  else if (k === '4') selectWeapon('tnt');
+  else if (k === '5') selectWeapon('bomb');
+  else if (k === '6') selectWeapon('tnt_ben');
+  else if (k === '7') selectWeapon('nova');
+  else if (k === '8') selectWeapon('nuke');
+  else if (k === '9') selectWeapon('tsunami');
+  else if (k === '0') selectWeapon('laser');
+  else if (k === 's' || k === 'S') selectWeapon('stone');
+  else if (k === 'v' || k === 'V') selectWeapon('vortex');
+  else if (k === 'f' || k === 'F') selectWeapon('fire');
+  else if (k === 'm' || k === 'M') toggleMute();
 });
 window.addEventListener('wheel', function (e) {
   const idx = WEAPONS.indexOf(LB.weapon);
@@ -2204,12 +3213,21 @@ function gatherLightSources() {
   for (let i = 0; i < LB.meteors.length; i++) srcs.push({ x: LB.meteors[i].position.x, col: 'rgba(255,150,60,', a: 0.55, w: 44 });
   // lit TNT blocks (brighter while flashing)
   for (let i = 0; i < LB.tnts.length; i++) {
-    srcs.push({ x: LB.tnts[i].body.position.x, col: 'rgba(255,90,60,', a: tntBlinkOn(LB.tnts[i].t) ? 0.6 : 0.35, w: 40 });
+    srcs.push({ x: LB.tnts[i].body.position.x, col: 'rgba(255,90,60,', a: tntBlinkOn(LB.tnts[i].t, LB.tnts[i].dur) ? 0.6 : 0.35, w: 40 });
   }
   // holes
   for (let i = 0; i < LB.holes.length; i++) srcs.push({ x: LB.holes[i].x, col: 'rgba(170,120,255,', a: 0.5, w: 62 });
   // fireworks rockets
   for (let i = 0; i < LB.rockets.length; i++) srcs.push({ x: LB.rockets[i].x, col: 'rgba(255,220,150,', a: 0.6, w: 40 });
+  // v3 weapons reflect in the Thames too
+  for (let i = 0; i < LB.novas.length; i++) srcs.push({ x: LB.novas[i].body.position.x, col: 'rgba(255,220,120,', a: 0.65, w: 90 });
+  for (let i = 0; i < LB.nukes.length; i++) srcs.push({ x: LB.nukes[i].body.position.x, col: 'rgba(255,120,60,', a: 0.5, w: 60 });
+  for (let i = 0; i < LB.fires.length; i++) {
+    if (LB.fires[i].state === 'wave') srcs.push({ x: (LB.fires[i].frontL + LB.fires[i].frontR) / 2, col: 'rgba(255,140,60,', a: 0.4, w: 120 });
+  }
+  for (let i = 0; i < LB.lasers.length; i++) srcs.push({ x: LB.lasers[i].head, col: 'rgba(120,235,255,', a: 0.5, w: 70 });
+  for (let i = 0; i < LB.vortices.length; i++) srcs.push({ x: LB.vortices[i].x, col: 'rgba(110,200,255,', a: 0.4, w: 60 });
+  for (let i = 0; i < LB.mushrooms.length; i++) srcs.push({ x: LB.mushrooms[i].x, col: 'rgba(255,150,60,', a: 0.6, w: 160 });
   // vehicle headlights (only when driving)
   for (let i = 0; i < LB.traffic.vehicles.length; i++) {
     const v = LB.traffic.vehicles[i];
@@ -2455,6 +3473,7 @@ function drawBodies() {
     if (lb.set === 'meteor') continue; // drawn separately
     if (lb.set === 'tnt') continue;    // drawn separately (Minecraft block)
     if (lb.set === 'ground') continue;
+    if (lb.set === 'bomb' || lb.set === 'nuke' || lb.set === 'nova' || lb.set === 'stone') continue; // v3: drawn separately
     const v = b.vertices;
     if (lb.kind === 'pod') {
       ctx.beginPath();
@@ -2592,52 +3611,61 @@ function drawTNTs() {
   const h = TNT_SIZE / 2, band = TNT_SIZE * 0.21;
   for (let i = 0; i < LB.tnts.length; i++) {
     const t = LB.tnts[i], b = t.body;
-    const blink = tntBlinkOn(t.t);
+    const blink = tntBlinkOn(t.t, t.dur);
     // warm halo so the block reads against the night scene (brighter on flash)
     ctx.globalCompositeOperation = 'lighter';
     ctx.globalAlpha = blink ? 0.75 : 0.4;
-    ctx.drawImage(SPR.glow.red, b.position.x - TNT_SIZE * 1.05, b.position.y - TNT_SIZE * 1.05, TNT_SIZE * 2.1, TNT_SIZE * 2.1);
+    ctx.drawImage(SPR.glow.red,
+      b.position.x - TNT_SIZE * 1.05,
+      b.position.y - TNT_SIZE * (t.ben ? 3.1 : 1.05),
+      TNT_SIZE * 2.1,
+      TNT_SIZE * (t.ben ? 6.2 : 2.1));
     ctx.globalCompositeOperation = 'source-over';
     ctx.globalAlpha = 1;
 
-    ctx.save();
-    ctx.translate(b.position.x, b.position.y);
-    ctx.rotate(b.angle);
-    // body — mottled red
-    ctx.fillStyle = '#c93a22';
-    ctx.fillRect(-h, -h, TNT_SIZE, TNT_SIZE);
-    const speck = b.plugin.lb.speck || [];
-    for (let k = 0; k < speck.length; k++) {
-      ctx.fillStyle = speck[k][2] ? '#e05a35' : '#a02c15';
-      ctx.fillRect(speck[k][0] - 1.5, speck[k][1] - 1.5, 3, 3);
-    }
-    // darker frame edges
-    ctx.fillStyle = 'rgba(70,15,5,0.55)';
-    ctx.fillRect(-h, -h, TNT_SIZE, 2.5);
-    ctx.fillRect(-h, h - 2.5, TNT_SIZE, 2.5);
-    ctx.fillStyle = 'rgba(60,12,4,0.35)';
-    ctx.fillRect(-h, -h, 2, TNT_SIZE);
-    ctx.fillRect(h - 2, -h, 2, TNT_SIZE);
-    // white lettering band
-    ctx.fillStyle = '#ece7dd';
-    ctx.fillRect(-h + 1.5, -band, TNT_SIZE - 3, band * 2);
-    ctx.fillStyle = 'rgba(40,8,2,0.5)';
-    ctx.fillRect(-h + 1.5, -band - 1, TNT_SIZE - 3, 1);
-    ctx.fillRect(-h + 1.5, band, TNT_SIZE - 3, 1);
-    ctx.fillStyle = '#22160f';
-    ctx.font = '900 ' + (TNT_SIZE * 0.30).toFixed(1) + 'px "Trebuchet MS", sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('TNT', 0, 0.5);
-    // fuse nub on top
-    ctx.fillStyle = '#3a2a1a';
-    ctx.fillRect(-1.5, -h - 3, 3, 3.5);
-    // Minecraft blink: whole texture flashes white, accelerating toward the boom
-    if (blink) {
-      ctx.fillStyle = 'rgba(255,255,255,0.88)';
+    // a plain TNT is one block; TNT BEN paints all three compound parts
+    const parts = t.ben ? b.parts.slice(1) : [b];
+    for (let pi = 0; pi < parts.length; pi++) {
+      const pb = parts[pi];
+      const speck = t.ben ? ((b.plugin.lb.specks || [])[pi] || []) : (b.plugin.lb.speck || []);
+      ctx.save();
+      ctx.translate(pb.position.x, pb.position.y);
+      ctx.rotate(pb.angle);
+      // body — mottled red
+      ctx.fillStyle = '#c93a22';
       ctx.fillRect(-h, -h, TNT_SIZE, TNT_SIZE);
+      for (let k = 0; k < speck.length; k++) {
+        ctx.fillStyle = speck[k][2] ? '#e05a35' : '#a02c15';
+        ctx.fillRect(speck[k][0] - 1.5, speck[k][1] - 1.5, 3, 3);
+      }
+      // darker frame edges
+      ctx.fillStyle = 'rgba(70,15,5,0.55)';
+      ctx.fillRect(-h, -h, TNT_SIZE, 2.5);
+      ctx.fillRect(-h, h - 2.5, TNT_SIZE, 2.5);
+      ctx.fillStyle = 'rgba(60,12,4,0.35)';
+      ctx.fillRect(-h, -h, 2, TNT_SIZE);
+      ctx.fillRect(h - 2, -h, 2, TNT_SIZE);
+      // white lettering band
+      ctx.fillStyle = '#ece7dd';
+      ctx.fillRect(-h + 1.5, -band, TNT_SIZE - 3, band * 2);
+      ctx.fillStyle = 'rgba(40,8,2,0.5)';
+      ctx.fillRect(-h + 1.5, -band - 1, TNT_SIZE - 3, 1);
+      ctx.fillRect(-h + 1.5, band, TNT_SIZE - 3, 1);
+      ctx.fillStyle = '#22160f';
+      ctx.font = '900 ' + (TNT_SIZE * 0.30).toFixed(1) + 'px "Trebuchet MS", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('TNT', 0, 0.5);
+      // fuse nub on top
+      ctx.fillStyle = '#3a2a1a';
+      ctx.fillRect(-1.5, -h - 3, 3, 3.5);
+      // Minecraft blink: whole texture flashes white, accelerating toward the boom
+      if (blink) {
+        ctx.fillStyle = 'rgba(255,255,255,0.88)';
+        ctx.fillRect(-h, -h, TNT_SIZE, TNT_SIZE);
+      }
+      ctx.restore();
     }
-    ctx.restore();
   }
   ctx.globalAlpha = 1;
 }
@@ -2780,14 +3808,350 @@ function drawTornados(t) {
   ctx.globalAlpha = 1;
 }
 
+function drawBombs() {
+  for (let i = 0; i < LB.bombs.length; i++) {
+    const b = LB.bombs[i].body;
+    ctx.save();
+    ctx.translate(b.position.x, b.position.y);
+    ctx.rotate(b.angle);
+    // faint shine so it reads against the night
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.globalAlpha = 0.22;
+    ctx.drawImage(SPR.glow.blue, -BOMB_R * 1.6, -BOMB_R * 1.6, BOMB_R * 3.2, BOMB_R * 3.2);
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 1;
+    // body + highlight
+    ctx.fillStyle = '#1c1c24';
+    ctx.beginPath(); ctx.arc(0, 3, BOMB_R, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.16)';
+    ctx.beginPath(); ctx.ellipse(-7, -5, 6.5, 4.5, -0.6, 0, Math.PI * 2); ctx.fill();
+    // screw cap + fuse
+    ctx.fillStyle = '#3d414e';
+    ctx.fillRect(-6, -BOMB_R - 2, 12, 6);
+    ctx.strokeStyle = '#c9a06b';
+    ctx.lineWidth = 3;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(0, -BOMB_R - 2);
+    ctx.quadraticCurveTo(5, -BOMB_R - 12, 12, -BOMB_R - 10);
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
+function drawNovas(t) {
+  for (let i = 0; i < LB.novas.length; i++) {
+    const nv = LB.novas[i], b = nv.body;
+    const k = clamp(nv.t / nv.dur, 0, 1);
+    const pul = 1 + 0.09 * Math.sin(t * 9 + i * 2);
+    const R2 = (NOVA_R + 6 + 30 * k) * pul;
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.globalAlpha = 0.5 + 0.4 * k;
+    ctx.drawImage(SPR.glow.gold, b.position.x - R2 * 1.9, b.position.y - R2 * 1.9, R2 * 3.8, R2 * 3.8);
+    ctx.globalAlpha = 0.35 + 0.45 * k;
+    ctx.drawImage(SPR.glow.white, b.position.x - R2, b.position.y - R2, R2 * 2, R2 * 2);
+    if (k > 0.55) {
+      // running hot: the star turns blue-white before it blows
+      ctx.globalAlpha = (k - 0.55) * 1.6;
+      ctx.drawImage(SPR.glow.cyan, b.position.x - R2 * 1.3, b.position.y - R2 * 1.3, R2 * 2.6, R2 * 2.6);
+    }
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = '#fff4d0';
+    ctx.beginPath(); ctx.arc(b.position.x, b.position.y, NOVA_R * (0.7 + 0.3 * pul), 0, Math.PI * 2); ctx.fill();
+  }
+}
+
+function drawNovaRings() {
+  ctx.globalCompositeOperation = 'lighter';
+  for (let i = 0; i < LB.novaRings.length; i++) {
+    const r = LB.novaRings[i];
+    const k = r.t / r.dur;
+    const rx = 830 * (1 - Math.pow(1 - k, 2.1));
+    const ry = rx * 0.32;
+    ctx.globalAlpha = (1 - k) * 0.85;
+    ctx.strokeStyle = hsl(r.hue + k * 100, 95, 66);
+    ctx.lineWidth = 11 * (1 - k) + 1.5;
+    ctx.beginPath(); ctx.ellipse(r.x, r.y, rx, ry, 0, 0, Math.PI * 2); ctx.stroke();
+    ctx.globalAlpha = (1 - k) * 0.5;
+    ctx.strokeStyle = hsl(r.hue + 40 + k * 100, 95, 74);
+    ctx.lineWidth = 5 * (1 - k) + 1;
+    ctx.beginPath(); ctx.ellipse(r.x, r.y, rx * 0.62, ry * 0.62, 0, 0, Math.PI * 2); ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+  ctx.globalCompositeOperation = 'source-over';
+}
+
+function drawNukes() {
+  const h = NUKE_SIZE / 2;
+  for (let i = 0; i < LB.nukes.length; i++) {
+    const t = LB.nukes[i], b = t.body;
+    const armed = t.t / t.dur;
+    const blink = armed > 0.3 && (t.t % Math.max(0.12, 0.7 - armed * 0.55)) < 0.06 + armed * 0.08;
+    ctx.save();
+    ctx.translate(b.position.x, b.position.y);
+    ctx.rotate(b.angle);
+    ctx.fillStyle = '#7e848f';
+    ctx.fillRect(-h, -h, NUKE_SIZE, NUKE_SIZE);
+    ctx.fillStyle = 'rgba(20,22,30,0.5)';
+    ctx.fillRect(-h, -h, NUKE_SIZE, 3);
+    ctx.fillRect(-h, h - 3, NUKE_SIZE, 3);
+    ctx.fillRect(-h, -h, 3, NUKE_SIZE);
+    ctx.fillRect(h - 3, -h, 3, NUKE_SIZE);
+    // trefoil
+    ctx.fillStyle = blink ? '#fff3b0' : '#ffd23e';
+    for (let s = 0; s < 3; s++) {
+      const a0 = -Math.PI / 2 + s * (Math.PI * 2 / 3) - 0.52;
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.arc(0, 0, h * 0.62, a0, a0 + 1.05);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.beginPath(); ctx.arc(0, 0, h * 0.16, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#23252e';
+    ctx.beginPath(); ctx.arc(0, 0, h * 0.10, 0, Math.PI * 2); ctx.fill();
+    if (blink) {
+      ctx.fillStyle = 'rgba(255,255,255,0.5)';
+      ctx.fillRect(-h, -h, NUKE_SIZE, NUKE_SIZE);
+    }
+    ctx.restore();
+    // siren glow
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.globalAlpha = 0.25 + 0.3 * armed;
+    ctx.drawImage(SPR.glow.red, b.position.x - 60, b.position.y - 60, 120, 120);
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 1;
+  }
+}
+
+function drawStones() {
+  for (let i = 0; i < LB.stones.length; i++) {
+    const st = LB.stones[i], b = st.body;
+    const lb = b.plugin.lb;
+    ctx.save();
+    ctx.translate(b.position.x, b.position.y);
+    ctx.rotate(b.angle);
+    ctx.fillStyle = '#7f7a8a';
+    ctx.beginPath(); ctx.arc(0, 0, STONE_R, 0, Math.PI * 2); ctx.fill();
+    const spots = lb.spots || [];
+    for (let k = 0; k < spots.length; k++) {
+      ctx.fillStyle = spots[k][3] ? 'rgba(60,56,70,0.7)' : 'rgba(170,165,180,0.5)';
+      ctx.beginPath(); ctx.arc(spots[k][0], spots[k][1], spots[k][2], 0, Math.PI * 2); ctx.fill();
+    }
+    // cracks appear as the armor wears
+    const hpF = clamp(lb.stoneHp / STONE_HP, 0, 1);
+    ctx.strokeStyle = 'rgba(30,28,38,0.8)';
+    ctx.lineWidth = 3;
+    if (hpF < 0.75) {
+      ctx.beginPath();
+      ctx.moveTo(-STONE_R * 0.7, -STONE_R * 0.2);
+      ctx.lineTo(-STONE_R * 0.1, 0);
+      ctx.lineTo(STONE_R * 0.4, -STONE_R * 0.35);
+      ctx.stroke();
+    }
+    if (hpF < 0.4) {
+      ctx.beginPath();
+      ctx.moveTo(-STONE_R * 0.3, STONE_R * 0.6);
+      ctx.lineTo(0, STONE_R * 0.1);
+      ctx.lineTo(STONE_R * 0.55, STONE_R * 0.3);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+}
+
+function drawTsunamis(t) {
+  for (let i = 0; i < LB.tsunamis.length; i++) {
+    const w = LB.tsunamis[i];
+    const x0 = Math.max(w.front - w.width, -W * 0.5);
+    ctx.beginPath();
+    ctx.moveTo(w.front, GROUND_Y + 8);
+    // steep face up to the crest
+    ctx.quadraticCurveTo(w.front - w.width * 0.06, GROUND_Y - w.height * 0.9, w.front - w.width * 0.22, GROUND_Y - w.height);
+    // long tail sloping back down
+    for (let x = w.front - w.width * 0.22; x > x0; x -= 26) {
+      ctx.lineTo(x, tsunamiSurfaceY(w, x));
+    }
+    ctx.lineTo(x0, GROUND_Y + 8);
+    ctx.closePath();
+    const g = ctx.createLinearGradient(0, GROUND_Y - w.height, 0, GROUND_Y);
+    g.addColorStop(0, 'rgba(120,200,255,0.95)');
+    g.addColorStop(0.35, 'rgba(50,120,220,0.88)');
+    g.addColorStop(1, 'rgba(20,50,140,0.85)');
+    ctx.fillStyle = g;
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(235,250,255,0.9)';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    let first = true;
+    for (let x = w.front - w.width * 0.22; x > x0; x -= 26) {
+      const y = tsunamiSurfaceY(w, x);
+      if (first) { ctx.moveTo(x, y); first = false; } else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+    // crest foam blobs
+    const crestX = w.front - w.width * 0.12;
+    ctx.fillStyle = 'rgba(240,250,255,0.85)';
+    for (let k = 0; k < 5; k++) {
+      const fx = crestX + Math.sin(t * 7 + k * 2.2) * 16 - k * 9;
+      const fy = GROUND_Y - w.height + Math.sin(t * 5 + k) * 7 + k * 4;
+      ctx.beginPath(); ctx.arc(fx, fy, 9 - k, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+}
+
+function drawLasers(t) {
+  ctx.globalCompositeOperation = 'lighter';
+  for (let i = 0; i < LB.lasers.length; i++) {
+    const bm = LB.lasers[i];
+    const x0 = bm.dir > 0 ? 0 : bm.head;
+    const x1 = bm.dir > 0 ? bm.head : W;
+    const fade = Math.min(1, bm.t * 6, (bm.dur - bm.t) * 3);
+    if (fade <= 0) continue;
+    // outer glow (soft blob stretched into a beam)
+    ctx.globalAlpha = 0.4 * fade;
+    ctx.drawImage(SPR.glow.cyan, x0, bm.y - 26, x1 - x0, 52);
+    ctx.globalAlpha = 0.5 * fade;
+    ctx.fillStyle = '#59e6ff';
+    ctx.fillRect(x0, bm.y - 6, x1 - x0, 12);
+    ctx.globalAlpha = 0.9 * fade;
+    ctx.fillStyle = '#bffcff';
+    ctx.fillRect(x0, bm.y - 2.6, x1 - x0, 5.2);
+    // electric jitter
+    ctx.globalAlpha = 0.7 * fade;
+    ctx.strokeStyle = '#e8ffff';
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    for (let x = x0; x <= x1; x += 42) {
+      const jy = bm.y + Math.sin(x * 0.05 + t * 40) * 3.4;
+      if (x === x0) ctx.moveTo(x, jy); else ctx.lineTo(x, jy);
+    }
+    ctx.stroke();
+    // flare at the travelling tip
+    ctx.globalAlpha = 0.8 * fade;
+    ctx.drawImage(SPR.glow.white, bm.head - 40, bm.y - 40, 80, 80);
+  }
+  ctx.globalAlpha = 1;
+  ctx.globalCompositeOperation = 'source-over';
+}
+
+function drawVortices(t) {
+  for (let i = 0; i < LB.vortices.length; i++) {
+    const v = LB.vortices[i];
+    const fade = Math.min(1, v.t * 2.5, (v.dur - v.t) * 1.5);
+    const TOP = 190;
+    const sway = function (h) { return Math.sin(t * 3.1 + h * 0.02 + v.phase) * (4 + h * 0.09); };
+    const wAt = function (h) { return 34 + h * 0.5; };
+    ctx.globalAlpha = fade;
+    // watery funnel
+    const grad = ctx.createLinearGradient(0, GROUND_Y, 0, GROUND_Y - TOP);
+    grad.addColorStop(0, 'rgba(70,160,235,0.85)');
+    grad.addColorStop(0.5, 'rgba(90,190,250,0.55)');
+    grad.addColorStop(1, 'rgba(150,225,255,0.18)');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.moveTo(v.x - wAt(0) + sway(0), GROUND_Y + 4);
+    for (let h = 0; h <= TOP; h += 16) ctx.lineTo(v.x - wAt(h) + sway(h), GROUND_Y - h);
+    for (let h = TOP; h >= 0; h -= 16) ctx.lineTo(v.x + wAt(h) + sway(h), GROUND_Y - h);
+    ctx.closePath();
+    ctx.fill();
+    // spiral streaks
+    ctx.strokeStyle = 'rgba(220,245,255,0.5)';
+    ctx.lineWidth = 2.4;
+    for (let s = 0; s < 4; s++) {
+      ctx.beginPath();
+      for (let h = 0; h <= TOP; h += 14) {
+        const ph = t * 6 + s * 1.6 + h * 0.03;
+        const off = Math.sin(ph) * wAt(h) * 0.7;
+        const px = v.x + sway(h) + off;
+        if (h === 0) ctx.moveTo(px, GROUND_Y - h); else ctx.lineTo(px, GROUND_Y - h);
+      }
+      ctx.stroke();
+    }
+    // churning foam ring
+    ctx.fillStyle = 'rgba(235,250,255,0.75)';
+    for (let k = 0; k < 7; k++) {
+      const a = t * 5 + k * (Math.PI * 2 / 7);
+      const rr = 26 + (k % 3) * 12;
+      ctx.beginPath();
+      ctx.arc(v.x + sway(0) + Math.cos(a) * rr, GROUND_Y + 2 + Math.sin(a) * 6, 6 - (k % 3), 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+}
+
+function drawFires(t) {
+  ctx.globalCompositeOperation = 'lighter';
+  for (let i = 0; i < LB.fires.length; i++) {
+    const f = LB.fires[i];
+    if (f.state === 'crate') {
+      const b = f.crate;
+      if (b && !b.plugin.lb.removed) {
+        ctx.globalAlpha = 0.5;
+        ctx.drawImage(SPR.glow.orange, b.position.x - 34, b.position.y - 34, 68, 68);
+      }
+      continue;
+    }
+    const fade = Math.max(0, 1 - f.t / f.dur);
+    // low hot glow along the whole band
+    const g = ctx.createLinearGradient(0, GROUND_Y, 0, GROUND_Y - 90);
+    g.addColorStop(0, 'rgba(255,140,50,' + (0.28 * fade).toFixed(3) + ')');
+    g.addColorStop(1, 'rgba(255,100,30,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(f.frontL, GROUND_Y - 90, f.frontR - f.frontL, 90);
+    // bright flames licking at each front
+    for (let k = 0; k < 3; k++) {
+      const fl = k === 0 ? f.frontL : (k === 1 ? f.frontR : (f.frontL + f.frontR) / 2 + Math.sin(t * 3 + i) * 40);
+      ctx.globalAlpha = 0.75 * fade;
+      ctx.drawImage(SPR.glow.orange, fl - 26, GROUND_Y - 44, 52, 52);
+    }
+  }
+  ctx.globalAlpha = 1;
+  ctx.globalCompositeOperation = 'source-over';
+}
+
+function drawMushrooms() {
+  for (let i = 0; i < LB.mushrooms.length; i++) {
+    const m = LB.mushrooms[i];
+    const k = m.t / m.dur;
+    const grow = Math.min(1, k * 2.2);
+    const fade = k > 0.68 ? Math.max(0, 1 - (k - 0.68) / 0.32) : 1;
+    const stemH = 330 * grow;
+    const capR = 185 * grow;
+    const ease = 1 - Math.pow(1 - grow, 2);
+    ctx.globalCompositeOperation = 'lighter';
+    // stem: hot column
+    const sg = ctx.createLinearGradient(0, m.y, 0, m.y - stemH);
+    sg.addColorStop(0, 'rgba(255,190,90,' + (0.5 * fade).toFixed(3) + ')');
+    sg.addColorStop(0.7, 'rgba(255,120,45,' + (0.34 * fade).toFixed(3) + ')');
+    sg.addColorStop(1, 'rgba(255,80,40,' + (0.12 * fade).toFixed(3) + ')');
+    ctx.fillStyle = sg;
+    const sw = 30 + 26 * ease;
+    ctx.fillRect(m.x - sw / 2, m.y - stemH, sw, stemH);
+    // cap: glowing dome
+    const capY = m.y - stemH;
+    ctx.globalAlpha = 0.85 * fade;
+    ctx.drawImage(SPR.glow.orange, m.x - capR, capY - capR * 0.9, capR * 2, capR * 1.8);
+    ctx.globalAlpha = 0.6 * fade;
+    ctx.drawImage(SPR.glow.gold, m.x - capR * 0.62, capY - capR * 0.6, capR * 1.24, capR * 1.2);
+    // ground fireball
+    ctx.globalAlpha = 0.5 * fade;
+    ctx.drawImage(SPR.glow.white, m.x - 70 * ease, m.y - 70 * ease, 140 * ease, 140 * ease);
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+  }
+}
+
 function drawReticle(t) {
-  if (!LB.pointer.active || LB.pointer.type !== 'mouse' || LB.phase === 'title') return;
+  if (!LB.pointer.active || LB.pointer.type !== 'mouse' || LB.phase === 'title' || LB.paused) return;
+  const meta = WEAPON_META[LB.weapon] || WEAPON_META.meteor;
   const w = screenToWorld(LB.pointer.x, LB.pointer.y);
-  const col = LB.weapon === 'meteor' ? 'rgba(255,170,80,0.95)' : LB.weapon === 'blackhole' ? 'rgba(180,130,255,0.95)' : LB.weapon === 'tnt' ? 'rgba(255,110,80,0.95)' : 'rgba(120,220,255,0.95)';
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   const sx = LB.pointer.x, sy = LB.pointer.y;
   const r = 17 + Math.sin(t * 5) * 2.5;
-  ctx.strokeStyle = col; ctx.lineWidth = 2.2;
+  ctx.strokeStyle = meta.col; ctx.lineWidth = 2.2;
   ctx.beginPath(); ctx.arc(sx, sy, r, 0, Math.PI * 2); ctx.stroke();
   ctx.beginPath();
   ctx.moveTo(sx - r - 7, sy); ctx.lineTo(sx - r + 3, sy);
@@ -2797,7 +4161,7 @@ function drawReticle(t) {
   ctx.stroke();
   ctx.font = '20px serif';
   ctx.textAlign = 'left';
-  ctx.fillText(LB.weapon === 'meteor' ? '☄️' : LB.weapon === 'blackhole' ? '🕳️' : LB.weapon === 'tnt' ? '🧨' : '🌪️', sx + 20, sy - 16);
+  ctx.fillText(meta.emo, sx + 20, sy - 16);
 }
 
 /* ============================================================
@@ -2832,9 +4196,13 @@ function frame(now) {
     if (fpsSamples.length > 120) fpsSamples.shift();
   }
   acc += dt;
-  let steps = 0;
-  while (acc >= STEP && steps < 4) { stepWorld(STEP); acc -= STEP; steps++; }
-  if (steps === 4) acc = 0;
+  if (LB.paused) {
+    acc = 0; // weapon picker open: the world holds its breath
+  } else {
+    let steps = 0;
+    while (acc >= STEP && steps < 4) { stepWorld(STEP); acc -= STEP; steps++; }
+    if (steps === 4) acc = 0;
+  }
   render(now / 1000);
 }
 
@@ -2855,11 +4223,21 @@ function render(t) {
   drawBodies();
   drawVehicles(1);       // near lane + flying wrecks: in front
   drawTNTs();
+  drawBombs();
+  drawNovas(t);
+  drawNukes();
+  drawStones();
   drawMeteors();
   drawTornados(t);
+  drawVortices(t);
+  drawFires(t);
   P.render(ctx, 'under');
   drawHoles(t);
+  drawTsunamis(t);
   ctx.globalCompositeOperation = 'lighter';
+  drawLasers(t);
+  drawMushrooms();
+  drawNovaRings();
   P.render(ctx, 'glow');
   ctx.globalCompositeOperation = 'source-over';
   drawEyeLEDs();
@@ -2943,10 +4321,11 @@ window.__TEST__ = {
     return LB.tnts.map(function (t) {
       return {
         id: t.id,
+        ben: !!t.ben,
         x: Math.round(t.body.position.x * 10) / 10,
         y: Math.round(t.body.position.y * 10) / 10,
         fuse: Math.round((t.dur - t.t) * 1000) / 1000,
-        blink: tntBlinkOn(t.t)
+        blink: tntBlinkOn(t.t, t.dur)
       };
     });
   },
@@ -2960,12 +4339,20 @@ window.__TEST__ = {
       particles: P.active, shake: Math.round(LB.shake),
       meteors: LB.meteors.length, holes: LB.holes.length, tornados: LB.tornados.length,
       tnts: LB.tnts.length,
+      bombs: LB.bombs.length, novas: LB.novas.length, nukes: LB.nukes.length,
+      tsunamis: LB.tsunamis.length, lasers: LB.lasers.length, stones: LB.stones.length,
+      vortices: LB.vortices.length, fires: LB.fires.length,
+      mushrooms: LB.mushrooms.length,
+      weapon: LB.weapon, pickerOpen: LB.paused,
       vehiclesOnScreen: LB.traffic.vehicles.length,
       continueMode: LB.continueMode,
       time: Math.round(LB.time * 10) / 10, eyeSpinDeg: Math.round(LB.eye.spin * 10) / 10
     };
   },
   fire: function (w, x, y) { return fire(w, x, y); },
+  selectWeapon: function (w) { selectWeapon(w); return LB.weapon; },
+  openPicker: function () { return openPicker(); },
+  closePicker: function () { return closePicker(); },
   screenToWorld: screenToWorld,
   destroyAll: destroyAll,
   reset: function () { resetWorld(); },

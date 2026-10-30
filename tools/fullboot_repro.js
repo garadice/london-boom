@@ -30,11 +30,12 @@ function makeEl(id) {
     id: id, textContent: '', style: {},
     classList: { add: function () {}, remove: function () {}, toggle: function () {} },
     addEventListener: function () {}, getAttribute: function () { return null; },
-    querySelectorAll: function () { return []; }
+    setAttribute: function () {}, appendChild: function () {},
+    querySelectorAll: function () { return []; }, querySelector: function () { return null; }
   };
 }
 const els = {};
-['game', 'hud', 'weapons', 'muteBtn', 'bellBtn', 'hint', 'title', 'win', 'playBtn', 'againBtn', 'keepBtn'].forEach(id => els[id] = makeEl(id));
+['game', 'hud', 'curWeapon', 'picker', 'pickerGrid', 'pickerClose', 'muteBtn', 'bellBtn', 'hint', 'title', 'win', 'playBtn', 'againBtn', 'keepBtn'].forEach(id => els[id] = makeEl(id));
 els.game = makeCanvas();
 
 const windowObj = {
@@ -52,7 +53,15 @@ const windowObj = {
 const documentObj = {
   getElementById: function (id) { return els[id] || makeEl(id); },
   querySelectorAll: function () { return []; },
-  createElement: function (tag) { return makeCanvas(); },
+  querySelector: function () { return null; },
+  createElement: function (tag) {
+    // sprites want a canvas; picker cards want element methods — give both
+    const c = makeCanvas();
+    c.textContent = ''; c.type = ''; c.className = '';
+    c.setAttribute = function () {};
+    c.appendChild = function () {};
+    return c;
+  },
   addEventListener: function () {}
 };
 
