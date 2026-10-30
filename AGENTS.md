@@ -18,9 +18,9 @@ tornado, TNT, bomb, TNT BEN, nova, nuke, tsunami, laser, rolling stone,
 water vortex, fire) selected through a full-screen weapon picker that pauses
 the game; all audio synthesized per weapon. A Westminster-style palace annex
 (271 blocks) is attached flush to the tower's right side with a waving Union
-Jack on its roof mast; destroying either structure cascades into the other.
-Fireworks celebrate victory; KEEP PLAYING continues in the ruins with live
-traffic, fireworks and a 🔄 NEW GAME button (or N key) that starts fresh.
+Jack mast on its roof; destroying either structure cascades into the other.
+Win = fireworks, then you simply keep playing in the ruins; a 🔄 NEW GAME
+button (or N key) is always on screen to start fresh.
 
 Live: https://london-boom.vercel.app
 Repo: https://github.com/garadice/london-boom (public, MIT, © 2026 Martin Mogis)
@@ -34,6 +34,11 @@ Repo: https://github.com/garadice/london-boom (public, MIT, © 2026 Martin Mogis
 - **Deploy rule (CRITICAL):** whenever a cached shell file changes, bump the
   `CACHE` name in `sw.js` — that bump is what makes clients pick up the new
   build. Forgetting it = players stuck on the old version.
+  **Convention (clarified 2026-10-30):** coder branches do NOT bump CACHE;
+  main applies the bump when merging/deploying (one bump per release covers
+  all merged changes). Gates: treat an unbumped coder branch as CORRECT;
+  verify only that the deployed CACHE differs from the previously deployed
+  one.
 - Kid-safe: no realistic gore, no scary audio spikes.
 
 ## Current state (v3, Oct 2026)
@@ -48,8 +53,16 @@ Repo: https://github.com/garadice/london-boom (public, MIT, © 2026 Martin Mogis
 - Clock: real local time, animated hands, front + foreshortened side face.
 - Bells: 🔔 button = full 12:00 (Westminster Quarters G♯4/F♯4/E4/B3 + 12× E3
   strikes); broken/cracked bell once when tower top collapses (rearms on reset).
-- Win → fireworks → KEEP PLAYING (traffic + periodic fireworks + 🔄 NEW GAME
-  button / N key = full fresh world) or PLAY AGAIN (exact restore, verified).
+- Win → fireworks + fanfare → **seamless auto-continue** in the ruins (traffic
+  + periodic fireworks, no overlay, no click; input stays live during the
+  show) — victory screen REMOVED (Martin, v3.1). 🔄 NEW GAME button (or N key)
+  is visible from PLAY onward, works mid-play/during finale → full fresh world.
+- v3.1 nuke: detonation = expanding vaporization wave (~1080 px/s) that
+  vaporizes EVERY tower/annex/Eye block (~1 s, debris flying outward) +
+  8.6 s animated mushroom cloud (fireball → churning stem → rolling ~590px
+  cap → dissipation) + redesigned armed crate (trefoil, hazard stripes, LED)
+  + layered sub-boom/rumble audio. Gates: t_c7f174e0 (9/9 DoD PASS; merged
+  after its required CACHE bump), t_f7fb31e9 (PASS).
 - v3 arsenal: 13 weapons via full-screen picker (pauses sim + audio), keys
   1-9/0/S/V/F, scroll-wheel cycle; per-weapon caps; per-weapon synth sounds.
 - Westminster annex wing (271 blocks) flush right of the tower + waving Union

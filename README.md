@@ -20,7 +20,7 @@ Break everything. Fireworks celebrate you. 🇬🇧
 | 💣 BOMB | classic round bomb, 2 s fuse, solid punch |
 | 🧱 TNT BEN | a 3-stack of TNT with a **3× blast** — the big one |
 | 🌟 NOVA | 3 s charge-up, then a supernova: huge colourful multi-ring blast |
-| ☢️ NUKE | siren… then a screen-wide blast that wipes every other effect |
+| ☢️ NUKE | siren… then a vaporization wave eats EVERY structure on screen + an animated mushroom cloud |
 | 🌊 TSUNAMI | a wave rolls in from the Thames and sweeps the city |
 | ⚡ LASER | horizontal beam from a screen edge, cuts blocks in its path |
 | 🪨 STONE | a giant boulder rolls through traffic and walls |
