@@ -4,7 +4,7 @@
    ⚠ CACHE name must be bumped whenever ANY cached file changes — the new
    cache name activates the updated service worker, and the activate step
    deletes the old cache. That is the deploy cache-bust mechanism. */
-const CACHE = 'london-boom-v3.0.0';
+const CACHE = 'london-boom-v3.1.0';
 
 const ASSETS = [
   './',
