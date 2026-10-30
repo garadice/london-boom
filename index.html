@@ -21,9 +21,26 @@
 
   /* ---------- HUD ---------- */
   #hud { position: fixed; inset: 0; pointer-events: none; z-index: 5; }
-  #weapons {
-    position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
-    display: flex; gap: 10px;
+  /* one big button showing the CURRENT weapon; tapping it opens the picker */
+  #curWeapon {
+    pointer-events: auto; cursor: pointer;
+    position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
+    min-width: 132px; min-height: 74px; padding: 8px 20px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+    background: linear-gradient(180deg, rgba(38,46,92,0.92), rgba(18,23,54,0.92));
+    border: 2px solid rgba(130,140,210,0.45); border-radius: 20px;
+    color: #cfd6ff; font-family: inherit;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.45);
+    transition: transform .12s ease, border-color .12s ease, box-shadow .12s ease;
+  }
+  #curWeapon .emo { font-size: 34px; line-height: 1.1; filter: drop-shadow(0 2px 3px rgba(0,0,0,.5)); }
+  #curWeapon .lbl { font-size: 12px; font-weight: 700; letter-spacing: 1px; }
+  #curWeapon:active { transform: translateX(-50%) translateY(2px); }
+  #curWeapon.active {
+    border-color: #ffca6b;
+    background: linear-gradient(180deg, rgba(84,66,32,0.95), rgba(46,33,24,0.95));
+    color: #ffe6b0;
+    box-shadow: 0 6px 22px rgba(255,170,60,0.35), 0 3px 10px rgba(0,0,0,0.5);
   }
   .wbtn {
     pointer-events: auto; cursor: pointer;
@@ -108,10 +125,38 @@
     text-shadow: 0 2px 0 rgba(15,45,110,0.6);
   }
   .bigbtn.blue:active { box-shadow: 0 3px 0 #1c3f8a, 0 6px 16px rgba(70,140,255,0.35); }
+  /* ---------- weapon picker ---------- */
+  .pickerPanel { max-width: min(94vw, 800px); padding: 26px 30px 22px; }
+  .pickerTitle {
+    font-weight: 900; letter-spacing: 4px; font-size: clamp(20px, 4vw, 30px);
+    background: linear-gradient(180deg, #fff3c4 15%, #ffc95e 60%, #ff7a3d 100%);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+    filter: drop-shadow(0 3px 0 rgba(120,40,10,0.5));
+  }
+  #pickerGrid {
+    display: grid; grid-template-columns: repeat(5, 1fr);
+    gap: 12px; margin: 16px 0 14px;
+  }
+  .wcard { min-width: 118px; min-height: 100px; padding: 10px 8px; }
+  .wcard .emo { font-size: 40px; }
+  .wcard .lbl { font-size: 11px; }
+  #pickerClose {
+    cursor: pointer; font-family: inherit; font-size: 20px; font-weight: 900;
+    color: #fff; padding: 12px 38px; border: none; border-radius: 999px;
+    background: linear-gradient(180deg, #7d86c8 0%, #4a5390 60%, #38406e 100%);
+    box-shadow: 0 5px 0 #232a4e, 0 10px 22px rgba(0,0,0,0.4);
+    letter-spacing: 2px;
+  }
+  #pickerClose:active { transform: translateY(3px); box-shadow: 0 2px 0 #232a4e; }
   @media (max-width: 700px) {
     .wbtn { min-width: 66px; min-height: 60px; padding: 6px 8px; }
     .wbtn .emo { font-size: 24px; }
     .wbtn .lbl { font-size: 9px; }
+    #curWeapon { min-width: 110px; min-height: 62px; }
+    #curWeapon .emo { font-size: 28px; }
+    #pickerGrid { grid-template-columns: repeat(3, 1fr); gap: 8px; }
+    .wcard { min-width: 96px; min-height: 84px; }
+    .wcard .emo { font-size: 30px; }
     #hint { display: none; }
   }
 </style>
@@ -120,21 +165,24 @@
 <canvas id="game"></canvas>
 
 <div id="hud">
-  <div id="weapons">
-    <button class="wbtn active" data-w="meteor" type="button"><span class="emo">☄️</span><span class="lbl">METEOR</span></button>
-    <button class="wbtn" data-w="blackhole" type="button"><span class="emo">🕳️</span><span class="lbl">BLACK HOLE</span></button>
-    <button class="wbtn" data-w="tornado" type="button"><span class="emo">🌪️</span><span class="lbl">TORNADO</span></button>
-    <button class="wbtn" data-w="tnt" type="button"><span class="emo">🧨</span><span class="lbl">TNT</span></button>
-  </div>
+  <button id="curWeapon" class="wbtn active" data-w="meteor" type="button" title="Tap to pick a weapon"><span class="emo">☄️</span><span class="lbl">METEOR</span></button>
   <button id="muteBtn" type="button" title="Sound on/off (M)">🔊</button>
   <button id="bellBtn" type="button" title="Ring the bells! (full 12 o'clock chime)">🔔</button>
-  <div id="hint">Click to fire! · 1 / 2 / 3 / 4 or scroll = switch weapon · M = mute</div>
+  <div id="hint">Tap to fire! · Tap the big button to choose a weapon · keys: 1-9, 0, S, V, F · M = mute</div>
+</div>
+
+<div id="picker" class="overlay hidden">
+  <div class="panel pickerPanel">
+    <div class="pickerTitle">PICK A WEAPON</div>
+    <div id="pickerGrid"></div>
+    <button id="pickerClose" type="button">✖&nbsp;CLOSE</button>
+  </div>
 </div>
 
 <div id="title" class="overlay">
   <div class="panel">
     <h1><span class="t1">LONDON</span><br><span class="t2">BOOM! 💥</span></h1>
-    <p>Big Ben and the London Eye are standing tall.<br>☄️ meteors · 🕳️ black holes · 🌪️ tornadoes · 🧨 TNT<br>Click everywhere. Break everything! 🇬🇧</p>
+    <p>Big Ben and the London Eye are standing tall.<br>☄️ 🕳️ 🌪️ 🧨 💣 🧱 🌟 ☢️ 🌊 ⚡ 🪨 🌀 🔥<br><b>13 weapons!</b> Tap the big button to pick one. Break everything! 🇬🇧</p>
     <button id="playBtn" class="bigbtn" type="button">▶&nbsp;PLAY</button>
   </div>
 </div>
