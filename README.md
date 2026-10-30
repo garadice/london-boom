@@ -2,7 +2,9 @@
 
 A browser physics-destruction game for kids (built for a 6-year-old London-wrecker).
 Elizabeth Tower (Big Ben), the London Eye and London traffic stand by the Thames at
-dusk — smash them with meteors, black holes, tornadoes and TNT until the fireworks
+dusk — smash them with 13 weapons — meteors, black holes, tornadoes, TNT, bombs,
+TNT BEN, novas, a nuke, tsunamis, lasers, a rolling boulder, water vortexes and
+fire waves — until the fireworks
 celebrate you. Then KEEP PLAYING in the ruins.
 
 **▶ Play it live:** https://london-boom.vercel.app
@@ -131,7 +133,7 @@ __TEST__.clock()             // { h, m, s, ms } — real local time shown on the
 __TEST__.bell()              // { scheduled, played, strikes, active, brokenPlayed, brokenEvents }
 __TEST__.playTwelve()        // fires the full 12:00 sequence programmatically
 __TEST__.keepPlaying()       // same as the KEEP PLAYING button
-__TEST__.weaponFired         // { meteor, blackhole, tornado, tnt } live counters
+__TEST__.weaponFired         // live counters for all 13 weapons
 __TEST__.events              // { explosions, consumed, fireworks, vehiclesExploded, vehiclesFlung, brokenBell, ... }
 __TEST__.tnt()               // live TNT blocks: [{ id, x, y, fuse (s remaining), blink }]
 __TEST__.fire(weapon, x, y)  // programmatic fire in world coords (1600x900)

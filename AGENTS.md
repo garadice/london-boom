@@ -13,9 +13,14 @@ Read this FIRST. It answers: who is this for, what we build, why, and how.
 
 ## What
 Browser physics-destruction game: Elizabeth Tower (Big Ben) + London Eye +
-London traffic by the Thames at dusk. Four weapons (meteor, black hole,
-tornado, TNT) destroy everything; fireworks celebrate victory; KEEP PLAYING
-mode continues in the ruins with live traffic and fireworks.
+London traffic by the Thames at dusk. **13 weapons** (meteor, black hole,
+tornado, TNT, bomb, TNT BEN, nova, nuke, tsunami, laser, rolling stone,
+water vortex, fire) selected through a full-screen weapon picker that pauses
+the game; all audio synthesized per weapon. A Westminster-style palace annex
+(271 blocks) is attached flush to the tower's right side with a waving Union
+Jack on its roof mast; destroying either structure cascades into the other.
+Fireworks celebrate victory; KEEP PLAYING continues in the ruins with live
+traffic, fireworks and a 🔄 NEW GAME button (or N key) that starts fresh.
 
 Live: https://london-boom.vercel.app
 Repo: https://github.com/garadice/london-boom (public, MIT, © 2026 Martin Mogis)
@@ -31,7 +36,7 @@ Repo: https://github.com/garadice/london-boom (public, MIT, © 2026 Martin Mogis
   build. Forgetting it = players stuck on the old version.
 - Kid-safe: no realistic gore, no scary audio spikes.
 
-## Current state (v2, Oct 2026)
+## Current state (v3, Oct 2026)
 - Elizabeth Tower: **462 blocks, 14 block types**, sections researched against
   real references (parliament.uk, Wikipedia, photo analysis): plinth → shaft →
   string courses → clock stage → belfry louvres → lantern → spire → gilded tip.
@@ -43,8 +48,14 @@ Repo: https://github.com/garadice/london-boom (public, MIT, © 2026 Martin Mogis
 - Clock: real local time, animated hands, front + foreshortened side face.
 - Bells: 🔔 button = full 12:00 (Westminster Quarters G♯4/F♯4/E4/B3 + 12× E3
   strikes); broken/cracked bell once when tower top collapses (rearms on reset).
-- Win → fireworks → KEEP PLAYING (traffic + periodic fireworks) or PLAY AGAIN
-  (exact restore, verified).
+- Win → fireworks → KEEP PLAYING (traffic + periodic fireworks + 🔄 NEW GAME
+  button / N key = full fresh world) or PLAY AGAIN (exact restore, verified).
+- v3 arsenal: 13 weapons via full-screen picker (pauses sim + audio), keys
+  1-9/0/S/V/F, scroll-wheel cycle; per-weapon caps; per-weapon synth sounds.
+- Westminster annex wing (271 blocks) flush right of the tower + waving Union
+  Jack mast on its roof; collapse cascades both ways; annex excluded from win
+  math (tower + Eye integrity only). Windows are PAINTED (real voids
+  destabilise Matter stacks — same decision as the tower).
 - Verified twice by independent real-browser gates (t_8d12d97c, t_faf21ab6,
   t_42d8868b): 0 console errors, 0 external requests, offline proven, clock
   exact to the second.
