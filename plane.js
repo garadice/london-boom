@@ -173,6 +173,15 @@ window.LBPlane = (function () {
     }
     ctx.scale(dir, 1);
     ctx.scale(1.35, 1.35);      // v4: bigger sprite so it reads as a plane even on phones
+    // far wing (pokes above the fuselage — classic side-view plane cue)
+    ctx.fillStyle = '#2c3350';
+    ctx.beginPath();
+    ctx.moveTo(-2, -4);
+    ctx.lineTo(6, -11);
+    ctx.lineTo(12, -11);
+    ctx.lineTo(7, -4);
+    ctx.closePath();
+    ctx.fill();
     // fuselage
     ctx.fillStyle = lb.color;
     ctx.beginPath();
@@ -189,54 +198,85 @@ window.LBPlane = (function () {
     ctx.strokeStyle = 'rgba(255,255,255,' + (0.28 + 0.34 * night).toFixed(3) + ')';
     ctx.lineWidth = 1.2;
     ctx.stroke();
-    // tail fin (white band keeps it readable at night)
-    ctx.fillStyle = lb.color;
+    // tail fin + stabiliser + main wing: dark navy fills by day (glare-proof
+    // against sun disc, clouds, pale sky) that LIFT toward a moonlit steel
+    // tone as night rises, so the silhouette does not sink into the dark sky.
+    // Light outline ties the shapes together in both regimes.
+    var moonFill = 'rgb(' + Math.round(44 + 80 * night) + ',' + Math.round(51 + 85 * night) + ',' + Math.round(80 + 86 * night) + ')';
+    ctx.lineWidth = 1.6;
+    ctx.strokeStyle = 'rgba(238,242,252,' + (0.5 + 0.42 * night).toFixed(3) + ')';
+    // tail fin (vertical, swept back, rises well clear of the body)
+    ctx.fillStyle = moonFill;
     ctx.beginPath();
-    ctx.moveTo(-19, -2);
-    ctx.lineTo(-15, -12);
-    ctx.lineTo(-10, -12);
-    ctx.lineTo(-11, -2);
+    ctx.moveTo(-8, -4);
+    ctx.lineTo(-12, -17);
+    ctx.lineTo(-20, -17);
+    ctx.lineTo(-19, -4);
     ctx.closePath();
     ctx.fill();
-    ctx.fillStyle = '#f2f4fa';
-    ctx.fillRect(-14.6, -10.5, 4, 3.4);
-    // wing (low, across the fuselage) + light top edge
-    ctx.fillStyle = '#39415e';
-    ctx.fillRect(-6, 0, 14, 3.4);
-    ctx.fillStyle = 'rgba(230,238,252,' + (0.5 + 0.4 * night).toFixed(3) + ')';
-    ctx.fillRect(-6, 0, 14, 1);
+    ctx.stroke();
+    // horizontal stabiliser (little rear wing)
+    ctx.beginPath();
+    ctx.moveTo(-9, 1);
+    ctx.lineTo(-19, 7);
+    ctx.lineTo(-25, 7);
+    ctx.lineTo(-22, 1);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    // main wing (sweeps down-back, well clear of the fuselage)
+    ctx.beginPath();
+    ctx.moveTo(2, 2);
+    ctx.lineTo(-5, 14);
+    ctx.lineTo(-16, 14);
+    ctx.lineTo(-10, 2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
     // cockpit + cabin windows (bright, readable day and night)
     ctx.fillStyle = '#b9d9f7';
     ctx.fillRect(12, -3.6, 5, 3);
     for (var i = 0; i < 4; i++) ctx.fillRect(-6 + i * 4.4, -2.8, 2.4, 2.6);
-    // propeller: spinning blur arc
+    // propeller: full translucent disc + a blade streak that NEVER collapses
+    // to a dot (the old ellipse's vertical extent went to zero whenever
+    // cos() crossed zero and it read as a nose cone). Dark blades by day
+    // (visible against the sun disc and pale sky) flip to moonlit light
+    // blades at night so the prop never goes dark-on-dark.
     propSpin += 0.9;
-    ctx.strokeStyle = 'rgba(210,220,240,' + (0.6 + 0.3 * night).toFixed(3) + ')';
-    ctx.lineWidth = 2.2;
+    ctx.fillStyle = 'rgba(210,220,240,' + (0.20 + 0.16 * night).toFixed(3) + ')';
     ctx.beginPath();
-    ctx.ellipse(22, 0, 2.4, 9.5 * Math.abs(Math.cos(propSpin)), 0, 0, Math.PI * 2);
+    ctx.ellipse(22, 0, 2.6, 9, 0, 0, Math.PI * 2);
+    ctx.fill();
+    var blade = 5.5 + 3.5 * Math.abs(Math.sin(propSpin));
+    ctx.strokeStyle = 'rgba(' + Math.round(31 + 183 * night) + ',' + Math.round(37 + 185 * night) + ',' + Math.round(64 + 180 * night) + ',' + (0.72 + 0.16 * night).toFixed(3) + ')';
+    ctx.lineWidth = 2;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(22, -blade);
+    ctx.lineTo(22, blade);
     ctx.stroke();
+    ctx.lineCap = 'butt';
     ctx.fillStyle = '#39405a';
     ctx.beginPath(); ctx.arc(22, 0, 1.8, 0, Math.PI * 2); ctx.fill();
     ctx.restore();
     // soft glow halo at night so the little plane pops against the dark
     if (night > 0.2) {
-      ctx.globalAlpha = 0.16 * night;
+      ctx.globalAlpha = 0.24 * night;
       ctx.drawImage(D.SPR.glow.white, b.position.x - 34, b.position.y - 34, 68, 68);
       ctx.globalAlpha = 1;
     }
-    // blinking nav light (always cute; brighter at night via additive pass below)
-    var blink = Math.sin(time * 6) > 0.4;
-    if (blink) {
-      ctx.fillStyle = crashing ? '#ff7060' : '#ff5a4e';
-      ctx.beginPath();
-      ctx.arc(b.position.x - dir * 13, b.position.y - 12, 1.8, 0, Math.PI * 2);
-      ctx.fill();
-      if (night > 0.2) {
-        ctx.globalAlpha = 0.5 * night;
-        ctx.drawImage(D.SPR.glow.red, b.position.x - dir * 13 - 6, b.position.y - 18, 12, 12);
-        ctx.globalAlpha = 1;
-      }
+    // nav beacon: steady dot (always legible at night) + a brighter pulse
+    var pulse = Math.sin(time * 6) > 0.4;
+    ctx.globalAlpha = 0.6 + 0.25 * night;
+    ctx.fillStyle = crashing ? '#ff7060' : '#ff5a4e';
+    ctx.beginPath();
+    ctx.arc(b.position.x - dir * 13, b.position.y - 12, pulse ? 2.2 : 1.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    if (pulse && night > 0.2) {
+      ctx.globalAlpha = 0.5 * night;
+      ctx.drawImage(D.SPR.glow.red, b.position.x - dir * 13 - 6, b.position.y - 18, 12, 12);
+      ctx.globalAlpha = 1;
     }
   }
 
@@ -251,7 +291,8 @@ window.LBPlane = (function () {
       x: plane ? Math.round(plane.body.position.x) : null,
       y: plane ? Math.round(plane.body.position.y) : null,
       dir: plane ? plane.body.plugin.lb.dir : null,
-      speed: plane ? Math.round(plane.body.plugin.lb.speed * 100) / 100 : null
+      speed: plane ? Math.round(plane.body.plugin.lb.speed * 100) / 100 : null,
+      angle: plane ? Math.round(plane.body.angle * 1000) / 1000 : null
     };
   }
 
@@ -275,11 +316,14 @@ window.LBPlane = (function () {
       if (plane.state === 'flying') {
         // offscreen: gone (keeps the sky tidy + the spawn cadence honest)
         if (b.position.x < -320 || b.position.x > D.W + 320) { despawn(); return; }
-        // kinematic cruise: pin pose + velocity every step (like road traffic)
+        // kinematic cruise: pin pose + velocity every step (like road traffic).
+        // The angle is PINNED too: the old approach set an angular VELOCITY
+        // (cos wobble) which Matter integrated into a ±23° pitch oscillation
+        // — at silhouette scale that read as constant stalling.
         var bob = Math.sin(plane.t * 1.7) * 4;
         D.M.Body.setPosition(b, { x: b.position.x, y: lb.alt + bob });
         D.M.Body.setVelocity(b, { x: lb.dir * lb.speed, y: 0 });
-        D.M.Body.setAngularVelocity(b, Math.cos(plane.t * 1.7) * 0.012);
+        D.M.Body.setAngle(b, 0.05 * Math.sin(plane.t * 1.7));   // gentle ±3° pitch: descending = nose down
         // soft contrail
         if ((D.step() % 3) === 0) {
           D.P.spawn('smoke', b.position.x - lb.dir * 22, b.position.y + 2, {

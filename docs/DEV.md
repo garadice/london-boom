@@ -14,8 +14,9 @@ sky.js                v4 day/night cycle: palette interpolation, sun/moon arcs,
 weather.js            v4 weather state machine (clear/cloudy/rain/storm/mist),
                       rain + lightning + fog rendering, synthesized rain/wind
                       loops + thunder + bird chirps
-plane.js              v4 the little plane: kinematic cruise, crash staging,
-                      multi-stage impact explosion entity
+plane.js              v4 the little plane: readable side-view silhouette
+                      (level-cruise angle pin), kinematic cruise, crash
+                      staging, multi-stage impact explosion entity
 sw.js                 service worker: cache-first local shell (offline + installable)
 manifest.json         PWA manifest (name, icons, standalone display, dusk colors)
 icons/                generated PNG icons (192/512 + maskable variants)
@@ -111,7 +112,7 @@ __TEST__.weather()           // { state, target, blend, rainDrops, fog, dim, lig
 __TEST__.setWeather(s)       // force a state: 'clear'|'cloudy'|'rain'|'storm'|'mist' (fast 0.8 s blend)
 __TEST__.advanceWeather()    // same as tapping ⛅ — next state in order
 __TEST__.spawnPlane()        // force a plane into the sky (max 1)
-__TEST__.plane()             // { onScreen, state, crashes, planeCrashes, x, y, dir, speed, nextSpawnIn }
+__TEST__.plane()             // { onScreen, state, crashes, planeCrashes, x, y, dir, speed, angle, nextSpawnIn }
 __TEST__.lightning()         // { strikes, boltOnScreen }
 __TEST__.counters()          // { planeCrashes, vehicleCrashes, lightningStrikes }
 ```
