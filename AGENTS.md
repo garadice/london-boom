@@ -41,7 +41,7 @@ Repo: https://github.com/garadice/london-boom (public, MIT, © 2026 Martin Mogis
   one.
 - Kid-safe: no realistic gore, no scary audio spikes.
 
-## Current state (v3, Oct 2026)
+## Current state (v4, Oct 2026)
 - Elizabeth Tower: **462 blocks, 14 block types**, sections researched against
   real references (parliament.uk, Wikipedia, photo analysis): plinth → shaft →
   string courses → clock stage → belfry louvres → lantern → spire → gilded tip.
@@ -72,6 +72,41 @@ Repo: https://github.com/garadice/london-boom (public, MIT, © 2026 Martin Mogis
 - Verified twice by independent real-browser gates (t_8d12d97c, t_faf21ab6,
   t_42d8868b): 0 console errors, 0 external requests, offline proven, clock
   exact to the second.
+- v4 sky (sky.js): 2-minute day/night cycle (60 s + 60 s) — interpolated
+  sky palettes (sunrise → day → sunset → night), arcing sun + moon (peaks
+  y≈200, clear of the HUD), twinkling stars, warm night windows on
+  tower/annex (additive pass), Eye LEDs + skyline windows scale with
+  darkness, moon/sun drag their reflection across the Thames, world tint
+  pre-mixed into one full-screen fill (SwiftShader worst case ≈1.09× noon
+  baseline). Ambient world time: NOT reset by NEW GAME; HUD clock stays
+  real local time.
+- v4 weather (weather.js): CLEAR / CLOUDY / RAIN / STORM / MIST,
+  auto-advance 20–40 s with a 4 s cross-fade; ⛅ button (top right) +
+  `__TEST__.setWeather` jump with a 0.8 s blend. Rain ≤300 drops +
+  splashes; storm = jagged bolt + scene flash + kid-safe low rumble thunder
+  delayed 0.5–1.5 s (ambient strikes every 2.5–7 s); mist = drifting fog
+  bands (far layer behind landmarks); clear-day bird chirps (quiet).
+  Rain/wind are synthesized noise loops through LB.audio (mute via master;
+  picker ducks + suspends). Weather is ambient — survives NEW GAME.
+- v4 plane (plane.js): one plane at a time (spawn 10–20 s, either
+  direction, y 80–165, kinematic cruise with a pinned level attitude ±3°,
+  prop blur + contrail + steady nav beacon with a brighter pulse).
+  Recognizable side-view silhouette at gameplay scale in day AND night:
+  dark fills that lift toward a moonlit steel tone as night rises,
+  light-outlined fin/stabiliser/wing, non-collapsing prop disc + blade
+  streak. ANY weapon/blast/tornado/black hole/nuke wave/laser/hard
+  collision sends it down: tumble + smoke/fire trail, real-physics fall,
+  impact = 3-stage boom + scorch + meteor-like block damage (core 55 /
+  push 300 via `planeImpactDamage`); water impact = splash + steam.
+  Counter: `planeCrashes`. `__TEST__.plane()` also reports `angle`.
+- v4 vehicle crashes: staged death — hit → `wrecked` (tumble, wheels pop
+  off as bounce/roll particles, fire trail, 0.75–1.15 s) → final boom with
+  the SAME block-damage radii as before (46/170/130). Counters increment
+  at wreck START; `vehiclesOnScreen` drops after the final boom.
+- v4 verified by native review round 2 (execution lens) + independent
+  verifier gate t_f2d0457c (PASS_WITH_CAVEATS / APPROVE, final tip
+  e11ae18): 10/10 DoD, plane silhouette day+night vision-proven, 13/13
+  weapons, regression sweep, PWA precache incl. the 3 new modules.
 
 ## Known debt / caveats (honest, non-blocking)
 - FPS only measured headless (SwiftShader): v2 chaos ≈ v1 baseline (no
@@ -80,8 +115,16 @@ Repo: https://github.com/garadice/london-boom (public, MIT, © 2026 Martin Mogis
 - `bellSeq.played` counter increments while muted (silencing itself is correct;
   counter semantics only).
 - Flung vehicles drawn in both render passes (harmless overdraw).
-- `game.js` is a ~3k-line single file. If a v3 gets big, split it (render /
-  world / weapons / traffic / audio modules) — keep no-build rule.
+- FPS numbers are headless SwiftShader on a CPU-contended box; the
+  plane-crash boom adds a transient particle burst of the same class as a
+  meteor blast (~1–2 s). Tsunami/vortex/fire/stone cannot reach the plane
+  (ground/water-bound) — by design.
+- v4 mist is technically present but faint (fog=1, ~7% contrast change —
+  vision-invisible); accepted polish debt. Plane legibility dips slightly
+  when crossing the moon's glare at night (verifier t_f2d0457c caveats).
+- `game.js` is a ~3.2k-line single file; v4 extracted the first modules
+  (sky.js / weather.js / plane.js). A deeper split (render / world /
+  weapons / traffic / audio) remains future work — keep no-build rule.
 
 ## Roadmap / open offers (awaiting Martin's word)
 - **TNT chain reactions**: blasts currently push but never ignite other TNT

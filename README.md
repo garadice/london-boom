@@ -43,7 +43,7 @@ while you choose. No reading needed: big emoji, big buttons, instant action.
   tower, Union Jack waving on its roof. Knock out the tower's wall and the
   wing comes down with it — or bring down the wing and crack the tower.
 - **The London Eye** — 157 physics parts, quietly turning, hanging pods.
-- **Day & night** — a 2-minute day, then a 2-minute night: the sun and the
+- **Day & night** — a 60-second day, then a 60-second night: the sun and the
   moon arc over the city, stars come out, windows light up warm and the
   Eye glows. Sunrise and sunset paint the sky orange.
 - **Weather** — tap ⛅ (top right) for the next weather: clear, cloudy,
@@ -51,9 +51,8 @@ while you choose. No reading needed: big emoji, big buttons, instant action.
   mist. Weather changes on its own too. Birds chirp on clear days.
 - **Traffic** — red double-deckers, black cabs and cars. Hit one and it
   tumbles, wheels popping off, on fire, before it goes up with a boom.
-- **Look out for the little plane** ✈️ crossing the sky — hit it with
-  anything and it spins down trailing smoke and fire and detonates on
-  impact.
+- **Look out for the little plane** ✈️ crossing the sky — hit it and it
+  spins down trailing smoke and fire and detonates on impact.
 - **Win** (wreck tower + Eye) → fireworks + fanfare, then the game keeps
   going in the ruins **by itself** (traffic + fireworks continue — no win
   screen, no pause). 🔄 **NEW GAME** (top left, there from the start) or `N`
