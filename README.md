@@ -18,7 +18,7 @@ have **14 weapons**. Break everything. Fireworks celebrate you. 🇬🇧
 | 🌪️ TORNADO | wanders for ~5 s, lifts and flings masonry and buses |
 | 🧨 TNT | place it anywhere — real physics block, 3 s flashing fuse |
 | 💣 BOMB | classic round bomb, 2 s fuse, solid punch |
-| 🧱 TNT BEN | a 3-stack of TNT with a **3× blast** — the big one |
+| 🗼 TNT BEN | one red-white Big-Ben-shaped tower bomb with a long sharp spire — taller than the old 3-stack, same **3× blast** |
 | 🌟 NOVA | 3 s charge-up, then a supernova: huge colourful multi-ring blast |
 | ☢️ NUKE | siren… then a vaporization wave eats EVERY structure on screen + an animated mushroom cloud |
 | 🌊 TSUNAMI | a wave rolls in from the Thames and sweeps the city |

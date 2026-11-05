@@ -1855,7 +1855,7 @@ function explodeTNT(t) {
   const b = t.body;
   if (!b.plugin.lb || b.plugin.lb.removed) return;
   const x = b.position.x, y = b.position.y;
-  // TNT BEN 🧱 detonates ~3x stronger than plain TNT; plain params untouched.
+  // TNT BEN 🗼 detonates ~3x stronger than plain TNT; plain params untouched.
   const ben = !!t.ben;
   const CORE = ben ? 112 : 74;        // vaporize core radius (px)
   const PUSH = ben ? 520 : 360;       // radial push radius (px)
@@ -2065,37 +2065,35 @@ function explodeBomb(t) {
   }
 }
 
-/* ---------------- TNT BEN 🧱 — 3-block TNT tower, 1.5 s fuse, 3x strength ---------------- */
+/* ---------------- TNT BEN 🗼 — one Elizabeth-Tower-shaped red-white bomb, 1.5 s fuse, 3x strength ---------------- */
+const TNT_BEN_W = TNT_SIZE;  // width unchanged vs the old 3-stack
+const TNT_BEN_H = 152;       // long sharp spire — taller than the old 3-stack (102 px), per Martin's amendment
+
 function spawnTntBen(x, y) {
-  const partOpts = {
+  // same total mass as the old 3-stack (3 × 34×34 × 0.004) so flings/impacts feel identical
+  // even though the footprint grew to match the taller silhouette
+  const density = 0.004 * (TNT_BEN_W * TNT_SIZE * 3) / (TNT_BEN_W * TNT_BEN_H);
+  // keep the base on the ground: the tap point was the old stack's centre
+  y = Math.min(y, GROUND_Y - TNT_BEN_H / 2 - 2);
+  const b = M.Bodies.rectangle(x, y, TNT_BEN_W, TNT_BEN_H, {
     friction: 0.6, frictionStatic: 0.9, restitution: 0.05,
-    density: 0.004, frictionAir: 0.01, sleepThreshold: 60, label: 'tnt'
-  };
-  const parts = [];
-  for (let i = 0; i < 3; i++) {
-    parts.push(M.Bodies.rectangle(x, y + TNT_SIZE - i * TNT_SIZE, TNT_SIZE, TNT_SIZE, partOpts));
-  }
-  const b = M.Body.create({ parts: parts });
+    density: density, frictionAir: 0.01, sleepThreshold: 60, label: 'tnt'
+  });
   tag(b, 'tnt', 'tnt_ben');
   b.plugin.lb.color = '#d5442c';
   const rng = mulberry32(90100 + ((++tntSeq) * 7919) % 65536);
-  const specks = [];
-  for (let p = 0; p < 3; p++) {
-    const hh = TNT_SIZE / 2, speck = [];
-    for (let k = 0; k < 7; k++) {
-      speck.push([-hh + 3 + rng() * (TNT_SIZE - 6), -hh + 2 + rng() * 7, rng() < 0.5]);
-      speck.push([-hh + 3 + rng() * (TNT_SIZE - 6), hh - 2 - rng() * 7, rng() < 0.5]);
-    }
-    specks.push(speck);
+  const specks = [];                 // mottled red-brick specks on the shaft zone
+  for (let k = 0; k < 22; k++) {
+    specks.push([-10 + rng() * 20, 4 + rng() * 70, rng() < 0.5]);
   }
-  b.plugin.lb.specks = specks;
+  b.plugin.lb.benSpecks = specks;
   M.Composite.add(world, b);
   const t = { id: tntSeq, body: b, t: 0, dur: 1.5, ben: true, on: true, audio: null };
   LB.tnts.push(t);
   LB.events.tntPlaced++;
   LB.audio.fuseStart(t);
   P.dustPuff(x, y, 0, -0.5, 30, 0.35);
-  P.sparks(x, y - TNT_SIZE * 1.5, 8, SPR.glow.gold, 4);
+  P.sparks(x, y - TNT_BEN_H / 2, 8, SPR.glow.gold, 4);
   return t;
 }
 
@@ -2913,12 +2911,12 @@ function stepWeapons(dt) {
     t.t += dts;
     // fuse sparks from the block's (rotated) top centre
     if (stepCounter % 2 === 0) {
-      const topOff = t.ben ? TNT_SIZE * 1.5 : TNT_SIZE / 2;
+      const topOff = t.ben ? TNT_BEN_H / 2 : TNT_SIZE / 2; // ben: spark at the spire tip
       const px = b.position.x + topOff * Math.sin(b.angle);
       const py = b.position.y - topOff * Math.cos(b.angle);
       P.spawn('spark', px + rand(-3, 3), py, {
         vx: rand(-0.8, 0.8), vy: rand(-2.2, -0.6), life: rand(0.2, 0.5),
-        size: rand(2, 4.5), drag: 0.94, grav: 0.06,
+        size: t.ben ? rand(3.5, 6.5) : rand(2, 4.5), drag: 0.94, grav: 0.06,
         spr: Math.random() < 0.7 ? SPR.glow.gold : SPR.glow.white
       });
     }
@@ -3647,7 +3645,7 @@ const WEAPON_META = {
   tornado: { emo: '🌪️', label: 'TORNADO', col: 'rgba(120,220,255,0.95)' },
   tnt: { emo: '🧨', label: 'TNT', col: 'rgba(255,110,80,0.95)' },
   bomb: { emo: '💣', label: 'BOMB', col: 'rgba(210,210,225,0.95)' },
-  tnt_ben: { emo: '🧱', label: 'TNT BEN', col: 'rgba(255,120,90,0.95)' },
+  tnt_ben: { emo: '🗼', label: 'TNT BEN', col: 'rgba(255,120,90,0.95)' },
   nova: { emo: '🌟', label: 'NOVA', col: 'rgba(255,230,120,0.95)' },
   nuke: { emo: '☢️', label: 'NUKE', col: 'rgba(255,220,60,0.95)' },
   tsunami: { emo: '🌊', label: 'TSUNAMI', col: 'rgba(90,190,255,0.95)' },
@@ -4380,51 +4378,157 @@ function drawTNTs() {
     ctx.globalCompositeOperation = 'source-over';
     ctx.globalAlpha = 1;
 
-    // a plain TNT is one block; TNT BEN paints all three compound parts
-    const parts = t.ben ? b.parts.slice(1) : [b];
-    for (let pi = 0; pi < parts.length; pi++) {
-      const pb = parts[pi];
-      const speck = t.ben ? ((b.plugin.lb.specks || [])[pi] || []) : (b.plugin.lb.speck || []);
-      ctx.save();
-      ctx.translate(pb.position.x, pb.position.y);
-      ctx.rotate(pb.angle);
-      // body — mottled red
-      ctx.fillStyle = '#c93a22';
-      ctx.fillRect(-h, -h, TNT_SIZE, TNT_SIZE);
-      for (let k = 0; k < speck.length; k++) {
-        ctx.fillStyle = speck[k][2] ? '#e05a35' : '#a02c15';
-        ctx.fillRect(speck[k][0] - 1.5, speck[k][1] - 1.5, 3, 3);
-      }
-      // darker frame edges
-      ctx.fillStyle = 'rgba(70,15,5,0.55)';
-      ctx.fillRect(-h, -h, TNT_SIZE, 2.5);
-      ctx.fillRect(-h, h - 2.5, TNT_SIZE, 2.5);
-      ctx.fillStyle = 'rgba(60,12,4,0.35)';
-      ctx.fillRect(-h, -h, 2, TNT_SIZE);
-      ctx.fillRect(h - 2, -h, 2, TNT_SIZE);
-      // white lettering band
-      ctx.fillStyle = '#ece7dd';
-      ctx.fillRect(-h + 1.5, -band, TNT_SIZE - 3, band * 2);
-      ctx.fillStyle = 'rgba(40,8,2,0.5)';
-      ctx.fillRect(-h + 1.5, -band - 1, TNT_SIZE - 3, 1);
-      ctx.fillRect(-h + 1.5, band, TNT_SIZE - 3, 1);
-      ctx.fillStyle = '#22160f';
-      ctx.font = '900 ' + (TNT_SIZE * 0.30).toFixed(1) + 'px "Trebuchet MS", sans-serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText('TNT', 0, 0.5);
-      // fuse nub on top
-      ctx.fillStyle = '#3a2a1a';
-      ctx.fillRect(-1.5, -h - 3, 3, 3.5);
-      // Minecraft blink: whole texture flashes white, accelerating toward the boom
-      if (blink) {
-        ctx.fillStyle = 'rgba(255,255,255,0.88)';
-        ctx.fillRect(-h, -h, TNT_SIZE, TNT_SIZE);
-      }
-      ctx.restore();
+    if (t.ben) {
+      drawTntBenTower(b, blink);
+      continue;
     }
+
+    // a plain TNT is one block (Minecraft texture)
+    const speck = b.plugin.lb.speck || [];
+    ctx.save();
+    ctx.translate(b.position.x, b.position.y);
+    ctx.rotate(b.angle);
+    // body — mottled red
+    ctx.fillStyle = '#c93a22';
+    ctx.fillRect(-h, -h, TNT_SIZE, TNT_SIZE);
+    for (let k = 0; k < speck.length; k++) {
+      ctx.fillStyle = speck[k][2] ? '#e05a35' : '#a02c15';
+      ctx.fillRect(speck[k][0] - 1.5, speck[k][1] - 1.5, 3, 3);
+    }
+    // darker frame edges
+    ctx.fillStyle = 'rgba(70,15,5,0.55)';
+    ctx.fillRect(-h, -h, TNT_SIZE, 2.5);
+    ctx.fillRect(-h, h - 2.5, TNT_SIZE, 2.5);
+    ctx.fillStyle = 'rgba(60,12,4,0.35)';
+    ctx.fillRect(-h, -h, 2, TNT_SIZE);
+    ctx.fillRect(h - 2, -h, 2, TNT_SIZE);
+    // white lettering band
+    ctx.fillStyle = '#ece7dd';
+    ctx.fillRect(-h + 1.5, -band, TNT_SIZE - 3, band * 2);
+    ctx.fillStyle = 'rgba(40,8,2,0.5)';
+    ctx.fillRect(-h + 1.5, -band - 1, TNT_SIZE - 3, 1);
+    ctx.fillRect(-h + 1.5, band, TNT_SIZE - 3, 1);
+    ctx.fillStyle = '#22160f';
+    ctx.font = '900 ' + (TNT_SIZE * 0.30).toFixed(1) + 'px "Trebuchet MS", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('TNT', 0, 0.5);
+    // fuse nub on top
+    ctx.fillStyle = '#3a2a1a';
+    ctx.fillRect(-1.5, -h - 3, 3, 3.5);
+    // Minecraft blink: whole texture flashes white, accelerating toward the boom
+    if (blink) {
+      ctx.fillStyle = 'rgba(255,255,255,0.88)';
+      ctx.fillRect(-h, -h, TNT_SIZE, TNT_SIZE);
+    }
+    ctx.restore();
   }
   ctx.globalAlpha = 1;
+}
+
+/* TNT BEN: one mini Elizabeth-Tower silhouette in red + white, drawn over the
+   single 34 × 152 physics body: plinth → shaft with stacked "TNT" lettering →
+   clock stage → belfry → crown ledge → long sharp red-white spire → fuse nub.
+   Same warm halo as before (kept in drawTNTs) lifts it against the night sky. */
+function drawTntBenTower(b, blink) {
+  const specks = b.plugin.lb.benSpecks || [];
+  const W2 = TNT_BEN_W / 2, T = -TNT_BEN_H / 2, B = TNT_BEN_H / 2; // -76 / +76
+  const EDGE = 'rgba(70,15,5,0.55)', RED = '#c93a22', RED_D = '#a02c15', WHITE = '#ece7dd', INK = '#22160f';
+  ctx.save();
+  ctx.translate(b.position.x, b.position.y);
+  ctx.rotate(b.angle);
+  // plinth (full body width, darker red, white cap line)
+  ctx.fillStyle = RED_D;
+  ctx.fillRect(-W2, B - 10, TNT_BEN_W, 10);
+  ctx.fillStyle = WHITE;
+  ctx.fillRect(-W2 + 1, B - 10, TNT_BEN_W - 2, 2);
+  // shaft (mottled red brick + white corner columns)
+  ctx.fillStyle = RED;
+  ctx.fillRect(-13, -1, 26, 67);
+  for (let k = 0; k < specks.length; k++) {
+    ctx.fillStyle = specks[k][2] ? '#e05a35' : '#a02c15';
+    ctx.fillRect(specks[k][0] - 1.5, specks[k][1] - 1.5, 3, 3);
+  }
+  ctx.fillStyle = WHITE;
+  ctx.fillRect(-13, -1, 3, 67);
+  ctx.fillRect(10, -1, 3, 67);
+  // stacked "T / N / T" letter tablets on the shaft (dark ink on white tablets)
+  ctx.fillStyle = WHITE;
+  ctx.fillRect(-6.5, 8, 13, 13);
+  ctx.fillRect(-6.5, 25, 13, 13);
+  ctx.fillRect(-6.5, 42, 13, 13);
+  ctx.fillStyle = INK;
+  ctx.font = '900 11px "Trebuchet MS", sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('T', 0, 14.5);
+  ctx.fillText('N', 0, 31.5);
+  ctx.fillText('T', 0, 48.5);
+  // string course under the clock stage
+  ctx.fillStyle = WHITE;
+  ctx.fillRect(-15, -4, 30, 3);
+  // clock stage (white face on a red frame, dark rim + static hands)
+  ctx.fillStyle = RED;
+  ctx.fillRect(-15, -18, 30, 14);
+  ctx.fillStyle = WHITE;
+  ctx.fillRect(-11, -16, 22, 10);
+  ctx.beginPath();
+  ctx.arc(0, -11, 6, 0, Math.PI * 2);
+  ctx.fillStyle = '#f7f2e6';
+  ctx.fill();
+  ctx.strokeStyle = '#4a1408';
+  ctx.lineWidth = 1.6;
+  ctx.stroke();
+  ctx.strokeStyle = INK;
+  ctx.lineWidth = 1.4;
+  ctx.beginPath();
+  ctx.moveTo(0, -11); ctx.lineTo(0, -15.2);   // minute hand → 12
+  ctx.moveTo(0, -11); ctx.lineTo(3.2, -8.8);  // hour hand → ~4
+  ctx.stroke();
+  ctx.fillStyle = INK;
+  ctx.fillRect(-0.8, -11.8, 1.6, 1.6);
+  // belfry (red, three white louvres)
+  ctx.fillStyle = RED;
+  ctx.fillRect(-13, -32, 26, 14);
+  ctx.fillStyle = WHITE;
+  ctx.fillRect(-9.5, -29, 3, 8);
+  ctx.fillRect(-1.5, -29, 3, 8);
+  ctx.fillRect(6.5, -29, 3, 8);
+  // crown ledge
+  ctx.fillStyle = WHITE;
+  ctx.fillRect(-15, -37, 30, 5);
+  // long sharp spire: red-white striped triangle from the ledge to a point
+  ctx.beginPath();
+  ctx.moveTo(-13, -37);
+  ctx.lineTo(13, -37);
+  ctx.lineTo(1, -73);
+  ctx.lineTo(-1, -73);
+  ctx.closePath();
+  ctx.save();
+  ctx.clip();
+  const stripeH = 36 / 6;                     // 6 stripes up the 36 px spire
+  for (let s = 0; s < 6; s++) {
+    ctx.fillStyle = s % 2 ? WHITE : RED;
+    ctx.fillRect(-13, -73 + s * stripeH, 26, stripeH + 0.5);
+  }
+  ctx.restore();
+  ctx.strokeStyle = EDGE;
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  // fuse nub at the sharp tip (the spark anchor)
+  ctx.fillStyle = '#3a2a1a';
+  ctx.fillRect(-1.5, T - 3, 3, 4.5);
+  // section outlines (read as string courses, keeps the silhouette legible at night)
+  ctx.strokeRect(-15, -18, 30, 14);
+  ctx.strokeRect(-13, -32, 26, 14);
+  ctx.strokeRect(-13, -1, 26, 67);
+  ctx.strokeRect(-W2, B - 10, TNT_BEN_W, 10);
+  // Minecraft blink: the whole tower flashes white, accelerating toward the boom
+  if (blink) {
+    ctx.fillStyle = 'rgba(255,255,255,0.88)';
+    ctx.fillRect(-W2, T, TNT_BEN_W, TNT_BEN_H);
+  }
+  ctx.restore();
 }
 
 function drawMeteors() {
