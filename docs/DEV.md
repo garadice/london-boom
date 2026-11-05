@@ -71,7 +71,8 @@ tools/quake_test.js   Node harness: full headless quake suite (27 checks)
   (increment at the wave hit, like v4 wreck-start semantics),
   `blocksLostByQuake` (per-quake max integrity delta, summed).
 - **Perf (headless measurements, t_26579f08)**: node physics-only cost
-  1.15–1.40× the destroyAll-chaos baseline across runs (median 1.18×;
+  1.15–1.41× the destroyAll-chaos baseline across runs (verifier-measured
+  medians 1.23–1.30×;
   absolute ≈1.0 ms/step of the 16.6 ms budget). Browser render on the
   SwiftShader box: collapse-state frames ~2–2.5× idle render (37 ms vs
   15 ms single-tab; noisy box, multiple tabs inflate it) — dominated by

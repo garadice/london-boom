@@ -41,7 +41,26 @@ Repo: https://github.com/garadice/london-boom (public, MIT, © 2026 Martin Mogis
   one.
 - Kid-safe: no realistic gore, no scary audio spikes.
 
-## Current state (v4, Oct 2026)
+## Current state (v4.1, Nov 2026)
+- **v4.1 EARTHQUAKE (quake.js)**: 14th weapon (key `E`, 14-slot picker). Tap
+  the ground → ~10 s event radiating from the epicenter: BUILDUP 3.4 s
+  (tremble + dust trickle + first cracks) → MAIN SHOCK 3 s (wavefront
+  540 px/s, distance-delayed shaking, fissures, sloshing Thames, staged
+  vehicle wrecks) → 3 AFTERSHOCKS (~1 s apart, fresh fronts finish
+  weakened survivors). Collapse is REAL physics: friction decay + joint
+  softening + genuine Eye-pin failures under a fatigue model; no scripted
+  body deletion. Win math normal — quakes alone can fire the finale
+  (proven). One quake at a time; ground-bound (never hits the plane).
+  Kid-safe audio: sub sine 23–37 Hz + noise low-passed ≤175 Hz, smoothed
+  envelope, gentle thuds. Perf guard: wake-gate (bodies under ~0.4
+  g-equivalent never wake — a woken-but-unloaded Matter stack creeps
+  apart). Module order: sky.js → weather.js → plane.js → quake.js →
+  game.js. sw.js precache includes quake.js. Hooks: `__TEST__.quake()` /
+  `forceQuake(x,y)`, counters {quakesFired, vehiclesWreckedByQuake,
+  blocksLostByQuake}, `state().quakes`. Tests: tools/quake_test.js (27
+  headless checks). Gates: coder t_26579f08 + verifier t_879c7dd7
+  APPROVE (fc76ae1; perf gate exceeded: quake holds idle FPS 1.00× while
+  destroyAll chaos drops to 7 fps).
 - Elizabeth Tower: **462 blocks, 14 block types**, sections researched against
   real references (parliament.uk, Wikipedia, photo analysis): plinth → shaft →
   string courses → clock stage → belfry louvres → lantern → spire → gilded tip.
@@ -122,6 +141,9 @@ Repo: https://github.com/garadice/london-boom (public, MIT, © 2026 Martin Mogis
 - v4 mist is technically present but faint (fog=1, ~7% contrast change —
   vision-invisible); accepted polish debt. Plane legibility dips slightly
   when crossing the moon's glare at night (verifier t_f2d0457c caveats).
+- v4.1 quake fissures are hard to see at night (vision found none on dark
+  peak frames; daytime clearly reads); accepted polish debt. DEV.md perf
+  figures are SwiftShader-box noise bands, not guarantees.
 - `game.js` is a ~3.2k-line single file; v4 extracted the first modules
   (sky.js / weather.js / plane.js). A deeper split (render / world /
   weapons / traffic / audio) remains future work — keep no-build rule.
