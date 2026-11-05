@@ -3,7 +3,7 @@
 A physics-destruction game for kids — built for a 6-year-old London-wrecker.
 Elizabeth Tower (Big Ben), its Westminster palace wing, the London Eye and
 London traffic stand by the Thames while the sun and moon arc overhead. You
-have **13 weapons**. Break everything. Fireworks celebrate you. 🇬🇧
+have **14 weapons**. Break everything. Fireworks celebrate you. 🇬🇧
 
 **▶ Play it live:** https://london-boom.vercel.app
 
@@ -26,6 +26,7 @@ have **13 weapons**. Break everything. Fireworks celebrate you. 🇬🇧
 | 🪨 STONE | a giant boulder rolls through traffic and walls |
 | 🌀 VORTEX | a 5 s whirlpool that drags debris in and grinds it up |
 | 🔥 FIRE | a fire wave spreads along the ground in both directions |
+| 🌋 EARTHQUAKE | tap the ground → a ~10 s quake rolls out from the epicenter: rumble builds, cracks spread, a visible wavefront shakes every building with distance delay, the Thames sloshes, cars bounce and flip — then 3 aftershocks finish off the wobbly survivors |
 
 ![Weapon picker](docs/screenshot-picker.png)
 
@@ -63,7 +64,7 @@ while you choose. No reading needed: big emoji, big buttons, instant action.
 | Action | How |
 | --- | --- |
 | Fire | click / tap anywhere |
-| Choose weapon | the big top button, keys `1`–`9` `0` `S` `V` `F`, or mouse wheel |
+| Choose weapon | the big top button, keys `1`–`9` `0` `S` `V` `F` `E`, or mouse wheel |
 | Change the weather | ⛅ (top right) — one tap, next weather |
 | Ring the bells | 🔔 (top right) |
 | Mute | 🔊 (top right) or `M` |
