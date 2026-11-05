@@ -150,7 +150,7 @@ __TEST__.playTwelve()        // fires the full 12:00 sequence programmatically
 __TEST__.keepPlaying()       // jumps straight to keep-playing (auto-runs at finale end; no button)
 __TEST__.weaponFired         // live counters for all 13 weapons
 __TEST__.events              // { explosions, consumed, fireworks, vehiclesExploded, vehiclesFlung, brokenBell, ... }
-__TEST__.tnt()               // live TNT blocks (entries carry a ben flag for TNT BEN)
+__TEST__.tnt()               // live TNT blocks (entries carry a ben flag for TNT BEN — one 34×152 tower body, see spawnTntBen/drawTntBenTower)
 __TEST__.fire(weapon, x, y)  // programmatic fire in world coords (1600x900)
 __TEST__.selectWeapon(w)     // switch weapon programmatically
 __TEST__.openPicker() / closePicker()
