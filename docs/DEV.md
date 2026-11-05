@@ -17,13 +17,69 @@ weather.js            v4 weather state machine (clear/cloudy/rain/storm/mist),
 plane.js              v4 the little plane: readable side-view silhouette
                       (level-cruise angle pin), kinematic cruise, crash
                       staging, multi-stage impact explosion entity
+quake.js              v4.1 the EARTHQUAKE: travelling seismic wavefronts,
+                      fatigue/joint-failure physics, fissures, slosh,
+                      synthesized rumble (see "v4.1 earthquake" below)
 sw.js                 service worker: cache-first local shell (offline + installable)
 manifest.json         PWA manifest (name, icons, standalone display, dusk colors)
 icons/                generated PNG icons (192/512 + maskable variants)
 vendor/matter.min.js  Matter.js 0.20.0 (MIT, vendored — the only library)
 tools/gen_icons.py    regenerates the icons (Pillow, build-time only)
 tools/fullboot_repro.js  Node harness: headless boot repro + variant checks
+tools/quake_test.js   Node harness: full headless quake suite (27 checks)
 ```
+
+## v4.1 earthquake (quake.js)
+
+- **Load order matters**: `sky.js` → `weather.js` → `plane.js` →
+  `quake.js` → `game.js`. quake.js is wired like the v4 modules: one
+  `LB_DEPS` bundle (extended with `flingVehicle` + `integrityOf`).
+- **The event (~10 s, one at a time)**: BUILDUP 3.4 s (local tremble +
+  dust trickles + first cracks) → MAIN SHOCK 3 s → AFTERSHOCKS 3.6 s
+  (3 pulses at +0.5/+1.6/+2.6 s). Epicenter = tap x clamped to the
+  ground line (ground-bound; the plane is skipped by design).
+- **Travelling-front model**: every shock is its own front radiating at
+  540 px/s (`localStrength(t, d)`), so each structure shakes on
+  ARRIVAL — distance-delayed, never all at once — and the aftershock
+  pulses re-ring fresh fronts that physically finish shaken survivors.
+  Intensity falls off with distance (`FALLOFF_R` 950, floor 0.05).
+- **Real structural failure, no scripted deletion**: blocks accrue
+  `qFat` while locally shaken above `FAT_GATE` 0.45; at FAT_T 0.5 their
+  friction decays (joints weaken), at 1.0 they turn crumbly; fatigued
+  blocks also take amplified force (up to 2.5×). The Eye softens joint
+  stiffness progressively while strongly shaken and fatigued pins then
+  FAIL for real (hangers snap, ring sections let go — budget 4/step,
+  per-body cooldown 15 steps) so pods drop and the wheel sags. All
+  collapse comes out of the physics; `integrityOf` drops only via the
+  normal 55 px origin rule, so quake destruction counts in the win math
+  (destroy tower + Eye with quakes → the finale fires).
+- **Wake gate**: bodies feeling < 0.4 g-equivalent force are never
+  woken — a Matter stack kept awake while nearly unloaded slowly
+  CREEPS apart (solver micro-corrections accumulate), so the far field
+  must sleep through a distant quake. This is also the main perf tool.
+- **Visuals**: fissure polylines grow from the epicenter (dark core +
+  lit edge + fracture ticks; they persist as ground scars until NEW
+  GAME), a soft wavefront band + dust kick rides each live front, the
+  Thames sloshes (3 sine crest lines + splashes), collapse zones billow
+  dust/smoke. Ground pass draws right after the road, under vehicles.
+- **Audio (kid-safe)**: sub sine 23–37 Hz + noise low-passed 55–175 Hz
+  through one smoothed envelope gain (builds to peak, ducks between
+  aftershocks); debris thuds reuse the gentle low-passed `thunk()`.
+  No snap/bandpass/crackle anywhere in the quake paths. Mute + the
+  picker's ctx.suspend silence it like every other sound.
+- **Counters**: `LB.events.quakesFired`, `vehiclesWreckedByQuake`
+  (increment at the wave hit, like v4 wreck-start semantics),
+  `blocksLostByQuake` (per-quake max integrity delta, summed).
+- **Perf (headless measurements, t_26579f08)**: node physics-only cost
+  1.15–1.40× the destroyAll-chaos baseline across runs (median 1.18×;
+  absolute ≈1.0 ms/step of the 16.6 ms budget). Browser render on the
+  SwiftShader box: collapse-state frames ~2–2.5× idle render (37 ms vs
+  15 ms single-tab; noisy box, multiple tabs inflate it) — dominated by
+  the debris field, not the quake layer (drawGround ≈ 0.63 ms). The
+  verifier's foreground FPS comparison is the real gate.
+- **Debug switches**: `QUAKE_NO_FORCE=1` (node env) disables force
+  application for bisecting; `LBQuake._drawGround` / `_fisCount` are
+  test-only exposures.
 
 ## v4 systems (sky / weather / plane)
 
@@ -114,7 +170,10 @@ __TEST__.advanceWeather()    // same as tapping ⛅ — next state in order
 __TEST__.spawnPlane()        // force a plane into the sky (max 1)
 __TEST__.plane()             // { onScreen, state, crashes, planeCrashes, x, y, dir, speed, angle, nextSpawnIn }
 __TEST__.lightning()         // { strikes, boltOnScreen }
-__TEST__.counters()          // { planeCrashes, vehicleCrashes, lightningStrikes }
+__TEST__.counters()          // { planeCrashes, vehicleCrashes, lightningStrikes, quakesFired, vehiclesWreckedByQuake, blocksLostByQuake }
+/* ---- v4.1: earthquake ---- */
+__TEST__.quake()             // { isQuaking, phase, elapsed, epicenter {x,y}, intensity, waveR, fissureSegs, towerLost, eyeLost, annexLost, quakesFired, vehiclesWreckedByQuake, blocksLostByQuake, scars }
+__TEST__.forceQuake(x, y)    // deterministic quake (ends any active one); epicenter x clamped, y snaps to the ground line
 ```
 
 Fire weapons via real pointer events on the canvas for the full path (the

@@ -685,6 +685,7 @@ LB.lasers = [];                  // v3: cutting beams
 LB.stones = [];                  // v3: rolling boulders
 LB.vortices = [];                // v3: water whirlpools
 LB.fires = [];                   // v3: pyre crates -> spreading fire waves
+LB.quakes = [];                  // v4.1: the single active earthquake (max 1)
 LB.paused = false;               // weapon picker open = the whole sim holds its breath
 LB.rockets = [];
 LB.decals = [];                 // scorch marks
@@ -693,8 +694,8 @@ LB.shake = 0;
 LB.flash = 0;
 LB.phase = 'title';             // title | play | finale
 LB.weapon = 'meteor';
-LB.weaponFired = { meteor: 0, blackhole: 0, tornado: 0, tnt: 0, bomb: 0, tnt_ben: 0, nova: 0, nuke: 0, tsunami: 0, laser: 0, stone: 0, vortex: 0, fire: 0 };
-LB.events = { explosions: 0, consumed: 0, fireworks: 0, brokenConstraints: 0, shakes: 0, splashes: 0, destroyedAll: 0, resets: 0, tntPlaced: 0, tntExploded: 0, vehiclesExploded: 0, vehiclesFlung: 0, brokenBell: 0, planeCrashes: 0, lightningStrikes: 0 };
+LB.weaponFired = { meteor: 0, blackhole: 0, tornado: 0, tnt: 0, bomb: 0, tnt_ben: 0, nova: 0, nuke: 0, tsunami: 0, laser: 0, stone: 0, vortex: 0, fire: 0, quake: 0 };
+LB.events = { explosions: 0, consumed: 0, fireworks: 0, brokenConstraints: 0, shakes: 0, splashes: 0, destroyedAll: 0, resets: 0, tntPlaced: 0, tntExploded: 0, vehiclesExploded: 0, vehiclesFlung: 0, brokenBell: 0, planeCrashes: 0, lightningStrikes: 0, quakesFired: 0, vehiclesWreckedByQuake: 0, blocksLostByQuake: 0 };
 LB.tower = { bodies: [], clockBodies: [], lanternBodies: [], topBodies: [], total: 0 };
 LB.annex = { bodies: [], total: 0 };   // v3 wave 2: Westminster wing (NOT part of the win math)
 LB.flag = null;                        // v3 wave 2: { body: mast pole } on the annex roof
@@ -1722,6 +1723,13 @@ function fire(weapon, wx, wy) {
     LB.weaponFired.fire++;
     return true;
   }
+  if (weapon === 'quake') {
+    if (LB.quakes.length >= 1) return false;   // one quake at a time — no stacking
+    if (!isFinite(wx)) return false;
+    LBQuake.spawn(wx, wy);                     // epicenter = tap x, clamped to the ground line
+    LB.weaponFired.quake++;
+    return true;
+  }
   return false;
 }
 
@@ -2009,6 +2017,8 @@ function clearAllEffects() {
   for (i = LB.stones.length - 1; i >= 0; i--) LB.audio.rumbleStop(LB.stones[i]);
   LB.stones.length = 0;
   LB.fires.length = 0;
+  LBQuake.stopAll();       // v4.1: rumble dies, fissures cleared
+  LB.quakes.length = 0;
   LB.novas.length = 0;
   LB.novaRings.length = 0;
   LB.meteors.length = 0;
@@ -3529,6 +3539,7 @@ function resetWorld() {
   LB.tnts = [];
   LB.bombs = []; LB.novas = []; LB.novaRings = []; LB.nukes = []; LB.nukeWaves = []; LB.mushrooms = [];
   LB.tsunamis = []; LB.lasers = []; LB.stones = []; LB.vortices = []; LB.fires = [];
+  LB.quakes = [];                        // v4.1: no quake survives a fresh world (stopAll already ran above)
   LB.decals = [];
   LB.tower.bodies = []; LB.tower.clockBodies = []; LB.tower.lanternBodies = [];
   LB.tower.topBodies = []; LB.tower.total = 0;
@@ -3548,12 +3559,13 @@ function resetWorld() {
   LB.weaponFired.tnt = 0; LB.weaponFired.bomb = 0; LB.weaponFired.tnt_ben = 0;
   LB.weaponFired.nova = 0; LB.weaponFired.nuke = 0; LB.weaponFired.tsunami = 0;
   LB.weaponFired.laser = 0; LB.weaponFired.stone = 0; LB.weaponFired.vortex = 0;
-  LB.weaponFired.fire = 0;
+  LB.weaponFired.fire = 0; LB.weaponFired.quake = 0;
   LB.events.explosions = 0; LB.events.consumed = 0; LB.events.fireworks = 0;
   LB.events.brokenConstraints = 0; LB.events.shakes = 0; LB.events.splashes = 0;
   LB.events.tntPlaced = 0; LB.events.tntExploded = 0;
   LB.events.vehiclesExploded = 0; LB.events.vehiclesFlung = 0; LB.events.brokenBell = 0;
   LB.events.planeCrashes = 0; LB.events.lightningStrikes = 0;
+  LB.events.quakesFired = 0; LB.events.vehiclesWreckedByQuake = 0; LB.events.blocksLostByQuake = 0;
   LBPlane.reset();                       // v4: sky is cleared of planes + crash booms
   // v4 NOTE: the day/night cycle and the weather are AMBIENT world state —
   // they deliberately keep running across NEW GAME (spec: the cycle never resets;
@@ -3628,7 +3640,7 @@ function hideHintSoon() {
   }
 }
 
-const WEAPONS = ['meteor', 'blackhole', 'tornado', 'tnt', 'bomb', 'tnt_ben', 'nova', 'nuke', 'tsunami', 'laser', 'stone', 'vortex', 'fire'];
+const WEAPONS = ['meteor', 'blackhole', 'tornado', 'tnt', 'bomb', 'tnt_ben', 'nova', 'nuke', 'tsunami', 'laser', 'stone', 'vortex', 'fire', 'quake'];
 const WEAPON_META = {
   meteor: { emo: '☄️', label: 'METEOR', col: 'rgba(255,170,80,0.95)' },
   blackhole: { emo: '🕳️', label: 'BLACK HOLE', col: 'rgba(180,130,255,0.95)' },
@@ -3642,7 +3654,8 @@ const WEAPON_META = {
   laser: { emo: '⚡', label: 'LASER', col: 'rgba(120,255,220,0.95)' },
   stone: { emo: '🪨', label: 'STONE', col: 'rgba(190,180,200,0.95)' },
   vortex: { emo: '🌀', label: 'VORTEX', col: 'rgba(110,220,255,0.95)' },
-  fire: { emo: '🔥', label: 'FIRE', col: 'rgba(255,150,70,0.95)' }
+  fire: { emo: '🔥', label: 'FIRE', col: 'rgba(255,150,70,0.95)' },
+  quake: { emo: '🌋', label: 'EARTHQUAKE', col: 'rgba(255,160,100,0.95)' }
 };
 function selectWeapon(w) {
   if (WEAPON_META[w]) LB.weapon = w;
@@ -3741,6 +3754,7 @@ window.addEventListener('keydown', function (e) {
   else if (k === 's' || k === 'S') selectWeapon('stone');
   else if (k === 'v' || k === 'V') selectWeapon('vortex');
   else if (k === 'f' || k === 'F') selectWeapon('fire');
+  else if (k === 'e' || k === 'E') selectWeapon('quake');   // v4.1: E = earthquake
   else if (k === 'm' || k === 'M') toggleMute();
   else if (k === 'n' || k === 'N') newGame(); // v3.2: fresh game any time after PLAY
 });
@@ -4931,6 +4945,7 @@ function stepWorld(dt) {
   stepCounter++;
   stepEye(dt);
   stepWeapons(dt);
+  LBQuake.step(dt);        // v4.1: quake forces before Engine.update reads them
   M.Engine.update(engine, dt);
   LB.bodies = M.Composite.allBodies(world);
   stepGuards();
@@ -4978,6 +4993,7 @@ function render(t) {
   LBWeather.drawFarMist(t);   // mist eats the far skyline before the landmarks are drawn
   drawGroundAndWaterBase();
   drawRoad();
+  LBQuake.drawGround(t);  // v4.1: fissures + wavefront + sloshing Thames (ground level)
   drawVehicles(0);       // far lane: behind the landmarks
   drawReflections(t);
   drawDecals();
@@ -5157,6 +5173,7 @@ window.__TEST__ = {
       nukeWaves: LB.nukeWaves.length,
       tsunamis: LB.tsunamis.length, lasers: LB.lasers.length, stones: LB.stones.length,
       vortices: LB.vortices.length, fires: LB.fires.length,
+      quakes: LB.quakes.length,
       mushrooms: LB.mushrooms.length,
       weapon: LB.weapon, pickerOpen: LB.paused,
       newGameBtn: !document.getElementById('newGameBtn').classList.contains('hidden'),
@@ -5187,9 +5204,15 @@ window.__TEST__ = {
     return {
       planeCrashes: LB.events.planeCrashes,
       vehicleCrashes: LB.events.vehiclesExploded,
-      lightningStrikes: LB.events.lightningStrikes
+      lightningStrikes: LB.events.lightningStrikes,
+      quakesFired: LB.events.quakesFired,
+      vehiclesWreckedByQuake: LB.events.vehiclesWreckedByQuake,
+      blocksLostByQuake: LB.events.blocksLostByQuake
     };
   },
+  /* ---- v4.1 hooks: earthquake ---- */
+  quake: function () { return LBQuake.info(); },
+  forceQuake: function (x, y) { return LBQuake.force(x, y); },
   screenToWorld: screenToWorld,
   destroyAll: destroyAll,
   reset: function () { resetWorld(); },
@@ -5214,6 +5237,7 @@ const LB_DEPS = {
   W, H, GROUND_Y, WATER_Y, HORIZON_Y, ROAD_NEAR_Y,
   CAT_VEHICLE, CAT_DEFAULT,
   rand, clamp, dist, tag, removeBody, vehicleByBody, explodeVehicle,
+  flingVehicle, integrityOf,           // v4.1: quake wreck staging + win-math attribution
   planeImpactDamage,
   step: function () { return stepCounter; },        // trail throttling
   cw: function () { return cw; }, ch: function () { return ch; },
@@ -5222,6 +5246,7 @@ const LB_DEPS = {
 LBSky.init(LB_DEPS);
 LBWeather.init(LB_DEPS);
 LBPlane.init(LB_DEPS);
+LBQuake.init(LB_DEPS);   // v4.1: the earthquake module (loaded before game.js)
 
 addGround();
 buildTower();
