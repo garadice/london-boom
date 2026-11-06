@@ -25,7 +25,7 @@ have **14 weapons**. Break everything. Fireworks celebrate you. 🇬🇧
 | ⚡ LASER | horizontal beam from a screen edge, cuts blocks in its path |
 | 🪨 STONE | a giant boulder rolls through traffic and walls |
 | 🌀 VORTEX | a 5 s whirlpool that drags debris in and grinds it up |
-| 🔥 FIRE | a fire wave spreads along the ground in both directions |
+| 🔥 FIRE | tap anywhere → a fire comet streaks down from the sky and blooms into a fire-flower — then the living fire **climbs Big Ben block by block**, chars the masonry black, and burning blocks break off and fall **while still on fire**, starting new blazes wherever they land. Rain and storms fight it (steam + hiss), tsunami & vortex put it out, cars catch fire, panic-drive and explode — and at 80+ blocks burning at once, the sky rains embers: **FIRESTORM**. At night the burning tower glows like a giant lantern |
 | 🌋 EARTHQUAKE | tap the ground → a ~10 s quake rolls out from the epicenter: rumble builds, cracks spread, a visible wavefront shakes every building with distance delay, the Thames sloshes, cars bounce and flip — then 3 aftershocks finish off the wobbly survivors |
 
 ![Weapon picker](docs/screenshot-picker.png)

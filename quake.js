@@ -65,7 +65,7 @@ window.LBQuake = (function () {
   ];
   var FIS_MAX = 26, FIS_PTS = 42, FIS_TOTAL = 700, SCAR_TOTAL = 1100;
 
-  var SKIP = { meteor: 1, tnt: 1, bomb: 1, nuke: 1, nova: 1, stone: 1, firecrate: 1, plane: 1 };
+  var SKIP = { meteor: 1, tnt: 1, bomb: 1, nuke: 1, nova: 1, stone: 1, plane: 1 };
 
   function rand2(a, b) { return a + Math.random() * (b - a); }
 
