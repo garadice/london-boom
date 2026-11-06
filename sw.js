@@ -14,6 +14,7 @@ const ASSETS = [
   'weather.js',
   'plane.js',
   'quake.js',
+  'fire.js',
   'vendor/matter.min.js',
   'manifest.json',
   'icons/icon-192.png',

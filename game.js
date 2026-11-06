@@ -188,6 +188,17 @@ LB.audio = {
         'bandpass', 2200 + Math.random() * 2200, 1800, 3), d * 1000);
     }
   },
+  /* ---- v4.2 WILDFIRE sounds (kid-safe: no roar, no spikes) ---- */
+  hiss() {
+    // steam: water beating fire — a soft breathy shhh
+    if (!this.throttle('hiss', 140)) return;
+    this.noise(0.32, 0.11, 'highpass', 2800, 900, 0.8);
+  },
+  swell() {
+    // firestorm: one gentle rising breath (2.6 s), never a roar
+    this.tone('sine', 150, 320, 2.6, 0.12);
+    this.tone('sine', 152.5, 324, 2.6, 0.07);
+  },
   /* ---- v3 arsenal sounds (all synthesized; every loop honours mute via master) ---- */
   boomDeep(p) {
     // round bombs: a fatter, lower boom than TNT
@@ -684,7 +695,7 @@ LB.tsunamis = [];                // v3: walls of water from the left edge
 LB.lasers = [];                  // v3: cutting beams
 LB.stones = [];                  // v3: rolling boulders
 LB.vortices = [];                // v3: water whirlpools
-LB.fires = [];                   // v3: pyre crates -> spreading fire waves
+LB.fires = [];                   // v4.2: fire comets in flight (owned by fire.js WILDFIRE)
 LB.quakes = [];                  // v4.1: the single active earthquake (max 1)
 LB.paused = false;               // weapon picker open = the whole sim holds its breath
 LB.rockets = [];
@@ -1321,6 +1332,7 @@ function explodeVehicleFinal(v) {
   if (lb.removed || lb.state !== 'wrecked') return;
   lb.state = 'dead';
   const x = b.position.x, y = b.position.y;
+  if (lb.fireV) LBFire.vehicleBoom(x, y);   // v4.2: a fire-killed vehicle's boom is a fireball
   const i = LB.traffic.vehicles.indexOf(v);
   if (i >= 0) LB.traffic.vehicles.splice(i, 1);
   LB.traffic.counts.onScreen = LB.traffic.vehicles.length;
@@ -1437,6 +1449,7 @@ function stepTraffic(dt) {
       M.Body.setVelocity(b, { x: lb.dir * lb.speed, y: 0 });
       M.Body.setAngularVelocity(b, 0);
       M.Body.setAngle(b, 0);
+      if (lb.fireV && !lb.fireV.done) LBFire.drivePanic(v); // v4.2: burning vehicle weaves + panics
     } else if (lb.state === 'flung') {
       const sp = Math.sqrt(b.velocity.x * b.velocity.x + b.velocity.y * b.velocity.y);
       const grounded = b.position.y > ROAD_NEAR_Y - v.def.h / 2 - 6;
@@ -1717,9 +1730,9 @@ function fire(weapon, wx, wy) {
     return true;
   }
   if (weapon === 'fire') {
-    if (LB.fires.length >= 3) return false;
-    if (!isFinite(wx)) return false;
-    spawnFire(clamp(wx, 60, W - 60));
+    if (!isFinite(wx) || !isFinite(wy)) return false;
+    if (!LBFire.canLaunch()) return false;     // max 3 comets in the sky
+    LBFire.launch(clamp(wx, 60, W - 60), clamp(wy, 90, GROUND_Y - 12));
     LB.weaponFired.fire++;
     return true;
   }
@@ -1946,7 +1959,7 @@ function explodeTNT(t) {
    share the radialBlast helper below; meteor/TNT keep their own
    hand-tuned loops untouched.
    ============================================================ */
-const WEAPON_SETS = { meteor: 1, tnt: 1, bomb: 1, nuke: 1, nova: 1, stone: 1, firecrate: 1 };
+const WEAPON_SETS = { meteor: 1, tnt: 1, bomb: 1, nuke: 1, nova: 1, stone: 1 };
 
 // Shared radial blast for the v3 weapons. Skips other weapons' bodies
 // (no chain detonations — matches the TNT roadmap decision), applies
@@ -2017,6 +2030,7 @@ function clearAllEffects() {
   for (i = LB.stones.length - 1; i >= 0; i--) LB.audio.rumbleStop(LB.stones[i]);
   LB.stones.length = 0;
   LB.fires.length = 0;
+  LBFire.stopAll();        // v4.2: fire dies with the effects sweep (burning lists + comets)
   LBQuake.stopAll();       // v4.1: rumble dies, fissures cleared
   LB.quakes.length = 0;
   LB.novas.length = 0;
@@ -2564,6 +2578,7 @@ function stepTsunamis(dts) {
       const bx = o.position.x;
       if (bx < left - 40 || bx > w.front + 40) continue;
       if (o.position.y < tsunamiSurfaceY(w, bx) - 12) continue;
+      if (lb.fire || lb.fireV) LBFire.extinguishBody(o);    // v4.2: the wave douses fire (steam + hiss)
       if (lb.set === 'vehicle') {
         if (lb.state === 'drive') {
           const veh = vehicleByBody(o);
@@ -2777,6 +2792,7 @@ function stepVortices(dts) {
       const dx = v.x - o.position.x, dy = v.y - o.position.y;
       const r = Math.sqrt(dx * dx + dy * dy);
       if (r > 430 || o.position.y < GROUND_Y - 360) continue;
+      if (lb.fire || lb.fireV) LBFire.extinguishBody(o);    // v4.2: vortex water douses fire (steam + hiss)
       if (lb.set === 'vehicle') {
         if (lb.state === 'drive') {
           if (r < 180) { const veh = vehicleByBody(o); if (veh) flingVehicle(veh, v.x); }
@@ -2815,81 +2831,6 @@ function stepVortices(dts) {
         life: rand(0.4, 0.9), size: rand(2.5, 5), grav: 0.18, drag: 0.97, spr: SPR.glow.cyan, a: 0.8
       });
     }
-  }
-}
-
-/* ---------------- FIRE 🔥 (old TRIANGEL) — pyre crate -> spreading fire wave ---------------- */
-const FIRE_SPREAD = 400, FIRE_DUR = 4.2;
-function spawnFire(x) {
-  const b = M.Bodies.polygon(x, GROUND_Y - 15, 3, 17, {
-    friction: 0.7, frictionStatic: 1, restitution: 0.05,
-    density: 0.004, frictionAir: 0.01, sleepThreshold: 60, label: 'firecrate'
-  });
-  tag(b, 'firecrate', 'firecrate');
-  b.plugin.lb.color = '#c2402f';
-  M.Composite.add(world, b);
-  const f = { x: x, frontL: x, frontR: x, t: 0, dur: FIRE_DUR, state: 'crate', crate: b, on: true };
-  LB.fires.push(f);
-  return f;
-}
-function stepFires(dts) {
-  for (let i = LB.fires.length - 1; i >= 0; i--) {
-    const f = LB.fires[i];
-    f.t += dts;
-    if (f.state === 'crate') {
-      if (stepCounter % 2 === 0 && f.crate && !f.crate.plugin.lb.removed) {
-        P.flame(f.crate.position.x + rand(-7, 7), f.crate.position.y - 8, rand(-0.4, 0.4), -rand(1.2, 2.6));
-      }
-      if (f.t >= 0.45 || !f.crate || f.crate.plugin.lb.removed) {
-        f.state = 'wave';
-        f.t = 0;
-        if (f.crate && !f.crate.plugin.lb.removed) {
-          P.embers(f.crate.position.x, f.crate.position.y, 14);
-          removeBody(f.crate, { silent: true });
-        }
-        f.crate = null;
-        LB.audio.boomDeep(0.35);
-        LB.audio.crackle(10);
-      }
-      continue;
-    }
-    f.frontL -= FIRE_SPREAD * dts;
-    f.frontR += FIRE_SPREAD * dts;
-    if (f.t > f.dur || (f.frontL < -180 && f.frontR > W + 180)) {
-      f.on = false;
-      LB.fires.splice(i, 1);
-      continue;
-    }
-    for (let k = 0; k < LB.bodies.length; k++) {
-      const o = LB.bodies[k];
-      if (o.isStatic || !o.plugin.lb || o.plugin.lb.removed) continue;
-      const lb = o.plugin.lb;
-      if (o.position.y < GROUND_Y - 95) continue;
-      if (o.position.x < f.frontL - 30 || o.position.x > f.frontR + 30) continue;
-      if (WEAPON_SETS[lb.set]) continue;
-      if (lb.set === 'vehicle') {
-        if (lb.state !== 'drive') continue;
-        lb.fireDmg = (lb.fireDmg || 0) + 110 * dts;
-        if (stepCounter % 4 === 0) P.flame(o.position.x + rand(-14, 14), o.position.y - 6, rand(-0.5, 0.5), -rand(1.5, 3));
-        if (lb.fireDmg > 55) { const veh = vehicleByBody(o); if (veh) explodeVehicle(veh); }
-        continue;
-      }
-      const wasCold = !lb.fireDmg;
-      lb.fireDmg = (lb.fireDmg || 0) + 70 * dts;
-      if (wasCold) M.Sleeping.set(o, false); // burned blocks start to sway
-      if (stepCounter % 6 === 0) P.flame(o.position.x + rand(-8, 8), o.position.y, rand(-0.3, 0.3), -rand(1, 2.4));
-      if (lb.fireDmg > 48) {
-        removeBody(o, {});
-        P.embers(o.position.x, o.position.y, 8);
-      }
-    }
-    // travelling flame fronts
-    if (stepCounter % 2 === 0) {
-      P.flame(f.frontL + rand(-12, 12), GROUND_Y - rand(0, 18), rand(-0.7, 0.2), -rand(1.2, 3));
-      P.flame(f.frontR + rand(-12, 12), GROUND_Y - rand(0, 18), rand(-0.2, 0.7), -rand(1.2, 3));
-      if (Math.random() < 0.6) P.flame(rand(f.frontL, f.frontR), GROUND_Y - rand(0, 14), rand(-0.3, 0.3), -rand(1, 2.2));
-    }
-    if (LB.audio.throttle('fire', 300)) LB.audio.crackle(2);
   }
 }
 
@@ -3168,7 +3109,7 @@ function stepWeapons(dt) {
   stepLasers(dts);
   stepStones(dts);
   stepVortices(dts);
-  stepFires(dts);
+  // v4.2: fire stepped by LBFire.step in stepWorld (living fire, no wave)
 }
 
 /* ---------------- Eye idle rotation + constraint stress ---------------- */
@@ -3538,6 +3479,7 @@ function resetWorld() {
   LB.bombs = []; LB.novas = []; LB.novaRings = []; LB.nukes = []; LB.nukeWaves = []; LB.mushrooms = [];
   LB.tsunamis = []; LB.lasers = []; LB.stones = []; LB.vortices = []; LB.fires = [];
   LB.quakes = [];                        // v4.1: no quake survives a fresh world (stopAll already ran above)
+  LBFire.reset();                        // v4.2: WILDFIRE counters + lists start clean
   LB.decals = [];
   LB.tower.bodies = []; LB.tower.clockBodies = []; LB.tower.lanternBodies = [];
   LB.tower.topBodies = []; LB.tower.total = 0;
@@ -4989,33 +4931,7 @@ function drawVortices(t) {
 }
 
 function drawFires(t) {
-  ctx.globalCompositeOperation = 'lighter';
-  for (let i = 0; i < LB.fires.length; i++) {
-    const f = LB.fires[i];
-    if (f.state === 'crate') {
-      const b = f.crate;
-      if (b && !b.plugin.lb.removed) {
-        ctx.globalAlpha = 0.5;
-        ctx.drawImage(SPR.glow.orange, b.position.x - 34, b.position.y - 34, 68, 68);
-      }
-      continue;
-    }
-    const fade = Math.max(0, 1 - f.t / f.dur);
-    // low hot glow along the whole band
-    const g = ctx.createLinearGradient(0, GROUND_Y, 0, GROUND_Y - 90);
-    g.addColorStop(0, 'rgba(255,140,50,' + (0.28 * fade).toFixed(3) + ')');
-    g.addColorStop(1, 'rgba(255,100,30,0)');
-    ctx.fillStyle = g;
-    ctx.fillRect(f.frontL, GROUND_Y - 90, f.frontR - f.frontL, 90);
-    // bright flames licking at each front
-    for (let k = 0; k < 3; k++) {
-      const fl = k === 0 ? f.frontL : (k === 1 ? f.frontR : (f.frontL + f.frontR) / 2 + Math.sin(t * 3 + i) * 40);
-      ctx.globalAlpha = 0.75 * fade;
-      ctx.drawImage(SPR.glow.orange, fl - 26, GROUND_Y - 44, 52, 52);
-    }
-  }
-  ctx.globalAlpha = 1;
-  ctx.globalCompositeOperation = 'source-over';
+  LBFire.draw(t);          // v4.2 WILDFIRE: char overlays + warm glow + comet heads (fire.js)
 }
 
 function drawReticle(t) {
@@ -5050,6 +4966,7 @@ function stepWorld(dt) {
   stepEye(dt);
   stepWeapons(dt);
   LBQuake.step(dt);        // v4.1: quake forces before Engine.update reads them
+  LBFire.step(dt);         // v4.2: WILDFIRE state machine + spread (timers run while bodies sleep)
   M.Engine.update(engine, dt);
   LB.bodies = M.Composite.allBodies(world);
   stepGuards();
@@ -5317,6 +5234,11 @@ window.__TEST__ = {
   /* ---- v4.1 hooks: earthquake ---- */
   quake: function () { return LBQuake.info(); },
   forceQuake: function (x, y) { return LBQuake.force(x, y); },
+  /* ---- v4.2 hooks: WILDFIRE ---- */
+  fireIgnite: function (x, y, r) { return LBFire.igniteAt(x, y, r); },
+  fires: function () { return LBFire.info(); },
+  fireAt: function (x, y, r) { return LBFire.fireAt(x, y, r === undefined ? 60 : r); },
+  forceFirestorm: function () { return LBFire.forceFirestorm(); },
   screenToWorld: screenToWorld,
   destroyAll: destroyAll,
   reset: function () { resetWorld(); },
@@ -5351,6 +5273,7 @@ LBSky.init(LB_DEPS);
 LBWeather.init(LB_DEPS);
 LBPlane.init(LB_DEPS);
 LBQuake.init(LB_DEPS);   // v4.1: the earthquake module (loaded before game.js)
+LBFire.init(LB_DEPS);    // v4.2: the WILDFIRE module (loaded before game.js)
 
 addGround();
 buildTower();
