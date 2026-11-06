@@ -41,7 +41,14 @@ Repo: https://github.com/garadice/london-boom (public, MIT, © 2026 Martin Mogis
   one.
 - Kid-safe: no realistic gore, no scary audio spikes.
 
-## Current state (v4.1, Nov 2026)
+## Current state (v4.1.2, Nov 2026)
+- **v4.1.2 TNT BEN redesign**: TNT BEN is now ONE Elizabeth-Tower-shaped
+  bomb (single 34×152 Matter body, red-white, clock face, stacked T/N/T
+  lettering, long sharp spire ~1/3 of height; fuse spark at the tip) instead
+  of 3 stacked TNT cubes. Mass matches the old 3-stack (13.87) so the fling
+  feel is preserved; boom untouched (3 staggered detonations, 3× strength,
+  1.5 s fuse). Picker tile 🗼 (was 🧱), label unchanged. Gates: coder
+  t_471a1d0b + verifier t_b972c440 APPROVE (1e09ced).
 - **v4.1 EARTHQUAKE (quake.js)**: 14th weapon (key `E`, 14-slot picker). Tap
   the ground → ~10 s event radiating from the epicenter: BUILDUP 3.4 s
   (tremble + dust trickle + first cracks) → MAIN SHOCK 3 s (wavefront
