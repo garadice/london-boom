@@ -33,6 +33,12 @@ have **14 weapons**. Break everything. Fireworks celebrate you. 🇬🇧
 Tap the big weapon button (top middle) to open the picker — the game pauses
 while you choose. No reading needed: big emoji, big buttons, instant action.
 
+![WILDFIRE — the new FIRE weapon at night](docs/screenshot-fire.png)
+
+The new 🔥 FIRE in action: a living blaze that climbs Big Ben block by block.
+Rain and storms fight it, water weapons put it out — and at night the burning
+tower glows like a giant lantern.
+
 ## The city
 
 - **Elizabeth Tower** — 462 blocks across 17 researched masonry courses:

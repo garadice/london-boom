@@ -41,7 +41,8 @@ Repo: https://github.com/garadice/london-boom (public, MIT, © 2026 Martin Mogis
   one.
 - Kid-safe: no realistic gore, no scary audio spikes.
 
-## Current state (v4.1.2, Nov 2026)
+## Current state (v4.2, Nov 2026)
+- **v4.2 WILDFIRE (fire.js) — FIRE weapon fully redone** (branch `coder/t_c74cfc69-wildfire`, commit 853332e, coder t_c74cfc69): tap anywhere → a fire comet streaks down and blooms into a fire-flower; the living fire then CLIMBS Elizabeth Tower block by block (directional heat: up 1.9×, down 0.45×; consumed blocks gift heat to their ceiling and fall as burning FIREBRANDS that start new fires where they land). Vehicles catch → panic-drive → explode → fireball. Rain/storm halve spread and actively extinguish (steam + hiss + wet timers); tsunami/vortex douse on contact. ≥80 burning = 3 s FIRESTORM beat (ember rain, taller flames, soft swell). Night: burning blocks glow warm (additive pass) + Thames tint. Caps: 110 concurrent burning (priority ignition queue), flame budget 10/step; LBFire ≈ 1.6 µs idle, ~6 % of a burning headless step (rest = collapse physics, quake-destroyAll class). Win math unchanged — fire alone fires the finale (headless-proven, 25–45 s). Old crate/wave path fully removed (0 grep hits). Hooks: `__TEST__.fireIgnite/fires/fireAt/forceFirestorm`; suite `node tools/fire_test.js` (39 checks). fire.js in sw.js ASSETS + index.html (CACHE bump applied by main at merge: v4.1.2 → v4.2.0).
 - **v4.1.2 TNT BEN redesign**: TNT BEN is now ONE Elizabeth-Tower-shaped
   bomb (single 34×152 Matter body, red-white, clock face, stacked T/N/T
   lettering, long sharp spire ~1/3 of height; fuse spark at the tip) instead
