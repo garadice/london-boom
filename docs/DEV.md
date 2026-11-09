@@ -204,6 +204,74 @@ tools/fire_test.js    Node harness: full headless WILDFIRE suite (39 checks)
 - **Hooks**: `__TEST__.fireIgnite(x,y,r?)`, `fires()`, `fireAt(x,y,r?)`,
   `forceFirestorm()` — see below. Headless suite: `node tools/fire_test.js`.
 
+## v4.3 rolling doom (game.js stone) + plane fire (plane.js)
+
+- **ROLLING DOOM — the stone, fully redone** (replaces the old
+  fixed-105px left-spawned roller and its HP-300 armor system; the old
+  `spawnStone`/`breakStone`/`stoneHp` path is gone, 0 grep hits):
+  - **Tap-directed entry**: tap x < W/2 → the boulder enters from the sky
+    off the LEFT side and rolls right through the tap point; mirror for the
+    right. Spawn point = tap ± `STONE_FALL_RUN` 490 px (the exact fall run),
+    y −290. Fall is a controlled plunge (vx pinned `STONE_FALL_VX` 9.2,
+    vy ramps 8 → capped 21) — a clean ~26–28° fall line that lands ON the
+    tap x (verified ±3 px). Anything under the sky line gets intercepted
+    for real: the boulder grinds through Eye arcs / rooftops on its way
+    down (emergent, physics — not an aim miss).
+  - **Sky entrance**: rising whistle + soft rush (sine 340→1350 Hz + band
+    noise, kid-safe), dust/pebble trail while falling (soft-capped at
+    P.active ≥ 2600), then the SLAM: shake +34, flash, `boomDeep(1.35)` +
+    low noise, crater flash rings + decal, and a radial shockwave via
+    `radialBlast(x, y−26, { core: 0, push: 360, vehCore: 0, fling: 13,
+    lift: 7, cutR: 96 })` — shove/sever only, nothing deleted (kid-safe);
+    vehicles within 330 px are FLUNG by `launchVehicleByStone` (fling +
+    spin, bigger arc than `flingVehicle`, explode on landing per the
+    existing flung-vehicle rules).
+  - **Colossal + unstoppable**: r 140 (was 105), density 0.055 (was 0.02,
+    mass ≈ 10,000× a masonry block). While rolling, vx is pinned toward the
+    far edge at `STONE_SPEED` 13 every step and angular velocity matches
+    (vx/R), so it never stalls; it self-rights over rubble ramps (position
+    clamp) and hops if ever pinned. Contact crush: normal masonry dies
+    instantly, `STONE_TOUGH` courses crack-shove first (`string`/`cornice`
+    2 hits, `louvre` 3), Eye rim parts snap, pods drop, vehicles launch.
+  - **Wear, not HP**: no armor/death while rolling — `st.wear` 0..1 grows
+    (+0.3 slam, +0.02/kill, +0.03/launch) and drives the painter: 3 crack
+    stages (≥0.25 / ≥0.5 / ≥0.75) + a darkening wash. Pebbles shed
+    continuously behind the roll (soft-capped).
+  - **Exit**: off the far edge (±W+200) or into the Thames → mega splash
+    (2×26/18 drops + rings + steam, `splash()` + `waterRush`), clean
+    despawn — no body left behind. Guard: NaN/removed body despawns
+    silently. Per-weapon cap unchanged (max 2 alive).
+  - **Win math untouched**: kills go through `removeBody`, so a
+    doom-stone-only run fires the finale normally (headless-proven: one
+    stone at the tower base → tower 0.04, Eye 0.33 → finale in ~2.5 s —
+    the roll under the Eye mauls its bottom rim by design).
+- **FIRE ignites the plane** (user instruction): any BURNING body that
+  reaches the flying plane sets it on fire; so does the comet bloom if the
+  plane is within the bloom radius (~70–90 px). Module boundaries stay
+  clean: fire.js only calls two deps hooks game.js provides —
+  `planeIgniteIfNear(x, y, r)` (forwarded to `LBPlane.igniteIfNear`) and
+  `planeOnFire()` (for `fires().planesOnFire`); it never touches LBPlane
+  directly.
+  - plane.js owns the staging: `LBPlane.ignite()` sets `lb.onFire
+    { t, dur 1.5–2.0 s }`; the plane keeps flying with a small flame trail
+    + smoke + a flickering additive glow on the fuselage, then goes down
+    through the EXISTING crash path (`hit()`: tumble, `planeCrashes++`,
+    staged impact boom + `planeImpactDamage`). Kid-safe: no mid-air
+    explosion. Contact radius: per-step burning-body↔fuselage check at
+    `PLANE_CONTACT_R` 46 px (the plane's mask excludes landmarks, so a
+    physics collision never fires — the proximity test IS the contact).
+  - The per-step check runs in fire.js over burning blocks AND burning
+    (fireV) vehicles; `igniteAround` special-cases the plane so blooms,
+    firebrand landings and vehicle fireballs all can catch it.
+- **Perf**: headless idle step cost unchanged vs main (0.94 vs 0.97
+  ms/step median, same harness); live plow window ≥ 30 fps on the
+  SwiftShader-class box (gate ≥ 24), idle 60 fps; particle shed soft-caps
+  at P.active 2600.
+- **Hooks** (below): `stoneSpawn(x, y)` (forced spawn, ignores the cap),
+  `stones()` → per-boulder `{ x, y, r, vx, heading, tilt, wear, kills,
+  state }` (`state` = fall | roll), `forceFirePlane()` (spawn if needed +
+  ignite now), `fires().planesOnFire`, `plane().onFire / burnT`.
+
 ## Engineering notes
 
 - Fixed-timestep physics (60 Hz accumulator, max 4 steps/frame), body
@@ -258,9 +326,14 @@ __TEST__.quake()             // { isQuaking, phase, elapsed, epicenter {x,y}, in
 __TEST__.forceQuake(x, y)    // deterministic quake (ends any active one); epicenter x clamped, y snaps to the ground line
 /* ---- v4.2: wildfire ---- */
 __TEST__.fireIgnite(x, y, r?) // ignite flammables around a point NOW (no comet); default r 70; returns { ignited, info }
-__TEST__.fires()             // { burning, ignited, firebrands, extinguished, queued, comets, vehiclesOnFire, stats { ignited, brandLandings, brandLandingIgnites, vehiclesIgnited, vehicleFireballs }, firestorm, weather, spreadMult, rainKillRate }
+__TEST__.fires()             // { burning, ignited, firebrands, extinguished, queued, comets, vehiclesOnFire, planesOnFire, stats { ignited, brandLandings, brandLandingIgnites, vehiclesIgnited, vehicleFireballs }, firestorm, weather, spreadMult, rainKillRate }
 __TEST__.fireAt(x, y, r?)    // count burning bodies within r of a point (default r 60)
 __TEST__.forceFirestorm()    // trigger the 3 s firestorm beat immediately
+/* ---- v4.3: ROLLING DOOM + plane fire ---- */
+__TEST__.stoneSpawn(x, y)    // forced doom boulder at tap x (ignores the 2-alive cap); enters from the nearest side
+__TEST__.stones()            // per-boulder { x, y, r, vx, heading, tilt (fall-line deg), wear 0..1, kills, state: 'fall'|'roll' }
+__TEST__.forceFirePlane()    // force a plane (if none) + set it on fire NOW; returns plane info
+__TEST__.plane()             // v4.3 adds onFire + burnT to the plane info
 ```
 
 Fire weapons via real pointer events on the canvas for the full path (the

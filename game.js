@@ -1718,7 +1718,8 @@ function fire(weapon, wx, wy) {
   }
   if (weapon === 'stone') {
     if (LB.stones.length >= 2) return false;
-    spawnStone();
+    if (!isFinite(wx)) return false;
+    spawnStone(clamp(wx, 60, W - 60));
     LB.weaponFired.stone++;
     return true;
   }
@@ -2676,60 +2677,159 @@ function stepLasers(dts) {
   }
 }
 
-/* ---------------- ROLLING STONE 🪨 — boulder from the left, crushes traffic ---------------- */
-const STONE_R = 105, STONE_SPEED = 14.5, STONE_HP = 300;
+/* ---------------- ROLLING DOOM 🪨 (v4.3) — colossal tap-aimed doom boulder.
+   Tap anywhere: the boulder enters from the sky off the NEAR side, falls at a
+   slight angle trailing dust with a rising whistle, SLAMS the ground at the
+   tap point (boom + shake + crater flash + radial shockwave that flips traffic
+   and dislodges masonry), then rolls THROUGH the tap point toward the far
+   edge — unstoppable, crushing every block and launching every vehicle it
+   touches — until it exits with a mega splash into the Thames / off-screen.
+   No HP system: it cannot die while rolling; it only WEARS (visual cracks +
+   pebble shed). Max 2 alive (per-weapon cap, unchanged). ---------------- */
+const STONE_R = 140, STONE_SPEED = 13, STONE_DENSITY = 0.055;
+const STONE_FALL_VX = 9.2, STONE_FALL_VY0 = 8, STONE_FALL_VY_MAX = 21, STONE_FALL_RUN = 490;
+/* tough masonry needs 2-3 doom contacts before it lets go (per design) */
+const STONE_TOUGH = { string: 2, cornice: 2, louvre: 3 };
 function stoneByBody(b) {
   for (let i = 0; i < LB.stones.length; i++) {
     if (LB.stones[i].body === b) return LB.stones[i];
   }
   return null;
 }
-function spawnStone() {
-  const b = M.Bodies.circle(-STONE_R - 40, GROUND_Y - STONE_R - 2, STONE_R, {
+function stoneAddWear(st, d) {
+  st.wear = Math.min(1, st.wear + d);
+}
+function spawnStone(tx) {
+  const dir = (isFinite(tx) && tx >= W / 2) ? -1 : 1;      // tap left half → enters from the left, rolls right; mirror for the right
+  const tapX = clamp(isFinite(tx) ? tx : W * 0.5, 60, W - 60);
+  const sx = clamp(tapX - dir * STONE_FALL_RUN, -STONE_R - STONE_FALL_RUN - 60, W + STONE_FALL_RUN + 60);  // sky entry off the near side (clamp wide enough: the run to the tap is always the full fall run)
+  const sy = -STONE_R - 150;
+  const b = M.Bodies.circle(sx, sy, STONE_R, {
     friction: 1.0, frictionStatic: 1, restitution: 0.02,
-    density: 0.02, frictionAir: 0.001, sleepThreshold: 400, label: 'stone'
+    density: STONE_DENSITY, frictionAir: 0.001, sleepThreshold: 400, label: 'stone'
   });
   tag(b, 'stone', 'stone');
-  b.plugin.lb.color = '#8d8797';
-  b.plugin.lb.stoneHp = STONE_HP;
+  b.plugin.lb.color = '#847e90';
   // fixed speckle pattern for the painter (stable across frames — no flicker)
-  const rng = mulberry32(5150 + LB.stones.length * 977);
+  const rng = mulberry32(5150 + LB.stones.length * 977 + (dir > 0 ? 0 : 551));
   const spots = [];
-  for (let k = 0; k < 14; k++) {
+  for (let k = 0; k < 18; k++) {
     const a = rng() * Math.PI * 2, rr = rng() * STONE_R * 0.72;
-    spots.push([Math.cos(a) * rr, Math.sin(a) * rr, 4 + rng() * 9, rng() < 0.5]);
+    spots.push([Math.cos(a) * rr, Math.sin(a) * rr, 5 + rng() * 11, rng() < 0.5]);
   }
   b.plugin.lb.spots = spots;
   M.Composite.add(world, b);
-  const st = { body: b, t: 0, stuck: 0, on: true, audio: null };
+  const st = { body: b, dir: dir, tapX: tapX, sx: sx, sy: sy, state: 'fall', t: 0, stuck: 0, wear: 0, kills: 0, tilt: 0, on: true, audio: null };
   LB.stones.push(st);
   M.Sleeping.set(b, false);
-  M.Body.setVelocity(b, { x: STONE_SPEED, y: 0 });
-  M.Body.setAngularVelocity(b, STONE_SPEED / STONE_R);
-  LB.audio.rumbleStart(st);
-  P.dustPuff(30, GROUND_Y - 16, 4, -2, 44, 0.35);
+  M.Body.setVelocity(b, { x: dir * STONE_FALL_VX, y: STONE_FALL_VY0 });
+  // the sky-fall warning: a rising whistle + a soft rush (kid-safe, no spike)
+  LB.audio.tone('sine', 340, 1350, 0.9, 0.09);
+  LB.audio.noise(0.9, 0.06, 'bandpass', 600, 2400, 1.3);
+  P.dustPuff(clamp(sx, 40, W - 40), 26, 0, 0.6, 44, 0.3);
   return st;
 }
-function breakStone(st) {
+/* the sky entrance lands: impact drama + the radial shockwave, then the roll begins */
+function stoneSlam(st) {
+  const b = st.body;
+  st.state = 'roll';
+  st.t = 0;
+  st.stuck = 0;
+  st.tilt = Math.round(Math.atan2(Math.abs(b.position.x - st.sx), Math.max(GROUND_Y - st.sy, 1)) * 180 / Math.PI);
+  const x = b.position.x, y = GROUND_Y;
+  M.Body.setVelocity(b, { x: st.dir * STONE_SPEED, y: Math.min(b.velocity.y, 6) });
+  M.Body.setAngularVelocity(b, b.velocity.x / STONE_R);
+  stoneAddWear(st, 0.3);
+  LB.shake = Math.min(LB.shake + 34, 55);
+  LB.events.shakes++;
+  LB.flash = Math.min(LB.flash + 0.22, 1);
+  LB.audio.boomDeep(1.35);
+  LB.audio.noise(0.6, 0.5, 'lowpass', 420, 55, 0.8);
+  LB.audio.rumbleStart(st);
+  // crater flash + expanding shockwave rings
+  P.ring(x, y - 8, 26, 9, 'rgba(255,225,160,0.9)');
+  P.ring(x, y - 8, 15, 5, 'rgba(255,200,120,0.8)');
+  P.ring(x, y - 8, 8, 3, 'rgba(255,190,110,0.6)');
+  P.sparks(x, y - 10, 16, SPR.glow.gold, 8);
+  for (let k = 0; k < 7; k++) {
+    P.dustPuff(x + rand(-160, 160), y - rand(4, 40), rand(-3, 3), -rand(1, 3.2), rand(34, 70), 0.4);
+  }
+  P.smoke(x, y - 20, 8, true);
+  LB.decals.push({ x: x, y: GROUND_Y + 8, size: rand(100, 140), alpha: 0.45 });
+  if (LB.decals.length > 14) LB.decals.shift();
+  // radial shockwave (kid-safe strength): shoves/cracks nearby masonry + severs
+  // a few nearby Eye cables — no instant deletions; traffic is flipped below
+  radialBlast(x, y - 26, { core: 0, push: 360, vehCore: 0, fling: 13, lift: 7, cutR: 96 });
+  for (let k = LB.traffic.vehicles.length - 1; k >= 0; k--) {
+    const veh = LB.traffic.vehicles[k];
+    if (dist(veh.body.position.x, veh.body.position.y, x, y - 20) < 330) {
+      launchVehicleByStone(st, veh);
+    }
+  }
+}
+/* contact crush: normal masonry dies instantly; string courses/cornices take
+   2 hits, belfry louvres 3 (they crack-shove on the non-lethal contacts) */
+function crushBlockByStone(st, o, oLb) {
+  if (oLb.removed) return;
+  const need = STONE_TOUGH[oLb.kind];
+  if (need) {
+    oLb.doomHits = (oLb.doomHits || 0) + 1;
+    if (oLb.doomHits < need) {
+      M.Sleeping.set(o, false);
+      M.Body.setVelocity(o, { x: o.velocity.x + st.dir * 3.5, y: o.velocity.y - 1.5 });
+      if (stepCounter % 2 === 0) P.dustPuff(o.position.x, o.position.y, st.dir, -1, 14, 0.3);
+      if (LB.audio.throttle('stoneCrunch', 90)) LB.audio.snap();
+      stoneAddWear(st, 0.02);
+      return;
+    }
+  }
+  removeBody(o, {});
+  st.kills++;
+  stoneAddWear(st, 0.02);
+  if (LB.audio.throttle('stoneCrunch', 90)) {
+    LB.audio.snap();
+    LB.audio.crackle(3);
+  }
+  P.debrisBurst(o.position.x, o.position.y, oLb.color || '#b9975a', 4);
+}
+/* vehicles in the boulder's path are LAUNCHED (fling + spin) — they explode
+   on landing per the existing flung-vehicle rules */
+function launchVehicleByStone(st, veh) {
+  const b = veh.body, lb = b.plugin.lb;
+  if (!lb || lb.removed || lb.state === 'wrecked' || lb.state === 'dead') return;
+  flingVehicle(veh, st.body.position.x);
+  if (lb.state !== 'flung') return;
+  // doom launch: bigger arc, more spin than the standard fling
+  const side = b.position.x >= st.body.position.x ? 1 : -1;
+  M.Body.setVelocity(b, { x: side * rand(7.5, 12.5), y: rand(-16, -11) });
+  M.Body.setAngularVelocity(b, rand(-0.55, 0.55));
+  stoneAddWear(st, 0.03);
+  LB.audio.thunk();
+}
+/* the mission ends: off the far edge or into the Thames — mega splash, sinks, gone */
+function exitStone(st) {
+  const b = st.body;
+  const x = clamp(b.position.x, 30, W - 30);
   LB.audio.rumbleStop(st);
   st.on = false;
   const i = LB.stones.indexOf(st);
   if (i >= 0) LB.stones.splice(i, 1);
-  const b = st.body;
-  if (!b.plugin.lb || b.plugin.lb.removed) return;
-  const x = b.position.x, y = b.position.y;
-  removeBody(b, { silent: true });
-  LB.shake = Math.min(LB.shake + 22, 55);
-  LB.events.explosions++;
-  LB.audio.burst();
-  LB.audio.boom(0.7);
-  P.debrisBurst(x, y, '#9a94a4', 26);
-  P.debrisBurst(x, y - 34, '#7d7787', 18);
-  P.smoke(x, y, 14, true);
-  for (let k = 0; k < 5; k++) {
-    P.dustPuff(x + rand(-60, 60), GROUND_Y - rand(0, 30), rand(-3, 3), -rand(1, 3), rand(30, 60), 0.35);
+  if (!b.plugin.lb || !b.plugin.lb.removed) removeBody(b, { silent: true });
+  P.splash(x, WATER_Y, 26);
+  P.splash(x, WATER_Y, 18);
+  P.ring(x, WATER_Y, 16, 5, 'rgba(170,210,255,0.8)');
+  P.ring(x, WATER_Y, 9, 3, 'rgba(170,210,255,0.8)');
+  for (let k = 0; k < 3; k++) {
+    P.spawn('smoke', x + rand(-30, 30), WATER_Y - rand(4, 16), {
+      vx: rand(-0.5, 0.5), vy: rand(-1.4, -0.6), life: rand(1.2, 2.2),
+      size: rand(14, 24), grow: 12, a: 0.4
+    });
   }
-  P.sparks(x, y, 20, SPR.glow.gold, 6);
+  LB.shake = Math.min(LB.shake + 12, 55);
+  LB.events.shakes++;
+  LB.events.splashes++;
+  LB.audio.splash();
+  LB.audio.waterRush(0.9);
 }
 function stepStones(dts) {
   for (let i = LB.stones.length - 1; i >= 0; i--) {
@@ -2737,27 +2837,62 @@ function stepStones(dts) {
     st.t += dts;
     if (!b.plugin.lb || b.plugin.lb.removed ||
         !isFinite(b.position.x) || !isFinite(b.position.y)) {
-      breakStone(st);
+      // guard: clean despawn, no drama, no body left behind
+      LB.audio.rumbleStop(st);
+      st.on = false;
+      LB.stones.splice(i, 1);
       continue;
     }
-    const sp = Math.abs(b.velocity.x);
-    // initial charge: hold the launch speed until it meets real resistance
-    if (st.t < 1.6 && sp > 0.5 && sp < STONE_SPEED) {
-      M.Body.setVelocity(b, { x: Math.min(sp + 0.3, STONE_SPEED), y: b.velocity.y });
-      M.Body.setAngularVelocity(b, b.velocity.x / STONE_R);
-    }
-    if (sp < 0.6) st.stuck += dts; else st.stuck = 0;
-    if (st.stuck > 1.4 || b.position.x > W + 220 || b.position.y > WATER_Y + 30) {
-      breakStone(st);
+    M.Sleeping.set(b, false);
+    if (st.state === 'fall') {
+      // controlled plunge: run held constant, vertical speed ramps in —
+      // a clean ~27 deg fall line that ends exactly at the tap point
+      const vy = Math.min(b.velocity.y + 0.5, STONE_FALL_VY_MAX);
+      M.Body.setVelocity(b, { x: st.dir * STONE_FALL_VX, y: vy });
+      // dust + pebble shed while it plummets (soft-capped for perf)
+      if (stepCounter % 2 === 0 && P.active < 2600) {
+        P.dustPuff(b.position.x + rand(-40, 40), b.position.y + rand(-20, STONE_R), st.dir * 0.4, -rand(0.5, 2), rand(18, 38), 0.3);
+        if (stepCounter % 6 === 0) {
+          P.spawn('debris', b.position.x + rand(-30, 30), b.position.y - STONE_R * 0.5, {
+            vx: rand(-1.5, 1.5), vy: rand(-2, 0.5), life: rand(0.5, 1.0),
+            size: rand(2.5, 5.5), grav: 0.12, drag: 0.99, vr: rand(-0.3, 0.3), col: '#8d8797'
+          });
+        }
+      }
+      if (b.position.y + STONE_R >= GROUND_Y - 4 || st.t > 3.2) stoneSlam(st);
       continue;
     }
-    // rumble volume rides the speed
+    // ROLL — the unstoppable mission toward the far edge
+    if (b.velocity.x * st.dir < STONE_SPEED) {
+      M.Body.setVelocity(b, { x: st.dir * STONE_SPEED, y: b.velocity.y });
+    }
+    M.Body.setAngularVelocity(b, b.velocity.x / STONE_R);
+    // self-right: a ramp of rubble can bury the rim — pop it back on its line
+    if (b.position.y > GROUND_Y + STONE_R * 0.5) {
+      M.Body.setPosition(b, { x: b.position.x, y: GROUND_Y - STONE_R });
+      M.Body.setVelocity(b, { x: b.velocity.x, y: 0 });
+    }
+    // never stalls: if something huge pins it, hop and keep driving
+    if (Math.abs(b.velocity.x) < 2.2) st.stuck += dts; else st.stuck = 0;
+    if (st.stuck > 0.6) {
+      M.Body.setVelocity(b, { x: st.dir * STONE_SPEED, y: -4.5 });
+      st.stuck = 0;
+    }
+    // rolling rumble rides the speed, fades when far away
     if (st.audio && st.audio.g) {
-      try { st.audio.g.gain.value = clamp(0.08 + sp * 0.02, 0.08, 0.34); } catch (e) {}
+      try { st.audio.g.gain.value = clamp(0.1 + Math.abs(b.velocity.x) * 0.016, 0.1, 0.34); } catch (e) {}
     }
-    // dust kicked up behind the roll
-    if (stepCounter % 2 === 0 && sp > 2) {
-      P.dustPuff(b.position.x - sp * 2.2, GROUND_Y - rand(2, 18), -sp * 0.12, -rand(0.5, 2.5), rand(14, 32), 0.3);
+    // continuous pebble shed behind the roll (soft-capped for perf)
+    if (stepCounter % 3 === 0 && P.active < 2600) {
+      P.spawn('debris', b.position.x - st.dir * (STONE_R * 0.75), b.position.y + rand(-STONE_R * 0.4, STONE_R * 0.3), {
+        vx: -st.dir * rand(1, 3), vy: -rand(1, 3.4), life: rand(0.5, 1.1),
+        size: rand(2.5, 6), grav: 0.13, drag: 0.99, vr: rand(-0.4, 0.4), col: '#7d7787'
+      });
+    }
+    // exit: off the far edge or into the Thames
+    if ((st.dir > 0 && b.position.x > W + 200) || (st.dir < 0 && b.position.x < -200) ||
+        b.position.y > WATER_Y - 10) {
+      exitStone(st);
     }
   }
 }
@@ -3269,7 +3404,9 @@ M.Events.on(engine, 'collisionStart', function (ev) {
         if (veh) { explodeVehicle(veh); continue; }
       }
     }
-    // ROLLING STONE: crushes any vehicle it touches, loses armor grinding masonry
+    // ROLLING DOOM: contact crush — vehicles are launched, masonry is crushed
+    // (normal blocks instantly, tough courses in 2-3 hits). No HP on the
+    // boulder itself: it wears visually instead (see stepStones/drawStones).
     const stLb = (la && la.set === 'stone') ? la : (lbb && lbb.set === 'stone' ? lbb : null);
     if (stLb) {
       const stBody = stLb === la ? A : B;
@@ -3279,15 +3416,10 @@ M.Events.on(engine, 'collisionStart', function (ev) {
         const oLb = other.plugin.lb;
         if (oLb && oLb.set === 'vehicle') {
           const veh = vehicleByBody(other);
-          if (veh) explodeVehicle(veh);
-          stBody.plugin.lb.stoneHp -= 8;
-          LB.shake = Math.min(LB.shake + 6, 55);
+          if (veh) launchVehicleByStone(st, veh);
         } else if (oLb && (oLb.set === 'tower' || oLb.set === 'annex' || oLb.set === 'eye')) {
-          stBody.plugin.lb.stoneHp -= 3;
-        } else {
-          stBody.plugin.lb.stoneHp -= 1;
+          crushBlockByStone(st, other, oLb);
         }
-        if (stBody.plugin.lb.stoneHp <= 0) breakStone(st);
       }
     }
     const rv = Math.sqrt((A.velocity.x - B.velocity.x) ** 2 + (A.velocity.y - B.velocity.y) ** 2);
@@ -4787,22 +4919,36 @@ function drawStones() {
       ctx.fillStyle = spots[k][3] ? 'rgba(60,56,70,0.7)' : 'rgba(170,165,180,0.5)';
       ctx.beginPath(); ctx.arc(spots[k][0], spots[k][1], spots[k][2], 0, Math.PI * 2); ctx.fill();
     }
-    // cracks appear as the armor wears
-    const hpF = clamp(lb.stoneHp / STONE_HP, 0, 1);
+    // wear: the doom boulder cannot die, but it visibly cracks up —
+    // three impact stages (slam ≈ stage 1, a plow run reaches stage 3)
+    const wear = st.wear || 0;
+    if (wear > 0.02) {
+      ctx.fillStyle = 'rgba(40,38,48,' + (wear * 0.3).toFixed(3) + ')';
+      ctx.beginPath(); ctx.arc(0, 0, STONE_R, 0, Math.PI * 2); ctx.fill();
+    }
     ctx.strokeStyle = 'rgba(30,28,38,0.8)';
-    ctx.lineWidth = 3;
-    if (hpF < 0.75) {
+    ctx.lineWidth = 3.5;
+    if (wear >= 0.25) {
       ctx.beginPath();
-      ctx.moveTo(-STONE_R * 0.7, -STONE_R * 0.2);
-      ctx.lineTo(-STONE_R * 0.1, 0);
-      ctx.lineTo(STONE_R * 0.4, -STONE_R * 0.35);
+      ctx.moveTo(-STONE_R * 0.75, -STONE_R * 0.25);
+      ctx.lineTo(-STONE_R * 0.15, 0.05 * STONE_R);
+      ctx.lineTo(STONE_R * 0.45, -STONE_R * 0.4);
       ctx.stroke();
     }
-    if (hpF < 0.4) {
+    if (wear >= 0.5) {
       ctx.beginPath();
-      ctx.moveTo(-STONE_R * 0.3, STONE_R * 0.6);
-      ctx.lineTo(0, STONE_R * 0.1);
-      ctx.lineTo(STONE_R * 0.55, STONE_R * 0.3);
+      ctx.moveTo(-STONE_R * 0.35, STONE_R * 0.65);
+      ctx.lineTo(-STONE_R * 0.05, STONE_R * 0.1);
+      ctx.lineTo(STONE_R * 0.6, STONE_R * 0.35);
+      ctx.stroke();
+    }
+    if (wear >= 0.75) {
+      ctx.beginPath();
+      ctx.moveTo(STONE_R * 0.7, -STONE_R * 0.6);
+      ctx.lineTo(STONE_R * 0.2, -STONE_R * 0.1);
+      ctx.lineTo(-STONE_R * 0.1, -STONE_R * 0.55);
+      ctx.moveTo(-STONE_R * 0.6, STONE_R * 0.2);
+      ctx.lineTo(-STONE_R * 0.2, STONE_R * 0.45);
       ctx.stroke();
     }
     ctx.restore();
@@ -5239,6 +5385,29 @@ window.__TEST__ = {
   fires: function () { return LBFire.info(); },
   fireAt: function (x, y, r) { return LBFire.fireAt(x, y, r === undefined ? 60 : r); },
   forceFirestorm: function () { return LBFire.forceFirestorm(); },
+  /* ---- v4.3 hooks: ROLLING DOOM + plane fire ---- */
+  stoneSpawn: function (x, y) { return spawnStone(isFinite(x) ? x : W / 2); },   // forced spawn (ignores the 2-alive cap)
+  stones: function () {
+    return LB.stones.map(function (st) {
+      const b = st.body;
+      return {
+        x: Math.round(b.position.x), y: Math.round(b.position.y), r: STONE_R,
+        vx: Math.round(b.velocity.x * 10) / 10,
+        heading: st.dir,
+        tilt: st.state === 'fall'
+          ? Math.round(Math.atan2(Math.abs(b.position.x - st.sx), Math.max(b.position.y - st.sy, 1)) * 180 / Math.PI)
+          : st.tilt,
+        wear: Math.round(st.wear * 100) / 100,
+        kills: st.kills,
+        state: st.state
+      };
+    });
+  },
+  forceFirePlane: function () {           // force a plane (if none) + set it on fire NOW
+    if (!LBPlane.body()) LBPlane.forceSpawn();
+    LBPlane.ignite();
+    return LBPlane.info();
+  },
   screenToWorld: screenToWorld,
   destroyAll: destroyAll,
   reset: function () { resetWorld(); },
@@ -5265,6 +5434,8 @@ const LB_DEPS = {
   rand, clamp, dist, tag, removeBody, vehicleByBody, explodeVehicle,
   flingVehicle, integrityOf,           // v4.1: quake wreck staging + win-math attribution
   planeImpactDamage,
+  planeIgniteIfNear: function (x, y, r) { return LBPlane.igniteIfNear(x, y, r); },  // v4.3: fire.js hook — burn a body touching the plane
+  planeOnFire: function () { return LBPlane.burning() ? 1 : 0; },                   // v4.3: planesOnFire counter for LBFire.info()
   step: function () { return stepCounter; },        // trail throttling
   cw: function () { return cw; }, ch: function () { return ch; },
   vs: function () { return vs; }, offY: function () { return offY; }

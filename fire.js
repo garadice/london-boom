@@ -77,6 +77,7 @@ window.LBFire = (function () {
   var STORM_AT = 80;               // firestorm trigger (burning blocks)
   var STORM_REARM_BELOW = 55;      // hysteresis before the next firestorm can arm
   var STORM_DUR = 3.0;             // the signature beat (s)
+  var PLANE_CONTACT_R = 46;        // v4.3: burning body ↔ fuselage contact distance (px)
 
   /* weather: spread multiplier + per-second extinguish chance (rain) */
   var SPREAD_MULT = { clear: 1.0, cloudy: 1.0, mist: 0.7, rain: 0.5, storm: 0.45 };
@@ -166,7 +167,9 @@ window.LBFire = (function () {
   }
 
   /* ignite everything flammable within r of (x, y) — the comet bloom,
-     fireball aftermath, firebrand landing burst */
+     fireball aftermath, firebrand landing burst. The flying plane is
+     special-cased: within the bloom radius it catches fire via the
+     game.js-provided hook (fire.js never touches LBPlane directly). */
   function igniteAround(x, y, r, vehicleR) {
     var n = 0;
     var vr = vehicleR === undefined ? r + 20 : vehicleR;
@@ -175,8 +178,14 @@ window.LBFire = (function () {
       var lb = o.plugin.lb;
       if (!lb || lb.removed) continue;
       var dx = o.position.x - x, dy = o.position.y - y;
-      var rr = lb.set === 'vehicle' ? vr : r;
-      if (dx * dx + dy * dy > rr * rr) continue;
+      if (lb.set === 'plane') {
+        var rr = vr > r ? vr : r;
+        if (dx * dx + dy * dy <= rr * rr && D.planeIgniteIfNear &&
+            D.planeIgniteIfNear(o.position.x, o.position.y, rr)) n++;
+        continue;
+      }
+      var rr2 = lb.set === 'vehicle' ? vr : r;
+      if (dx * dx + dy * dy > rr2 * rr2) continue;
       if (igniteBody(o)) n++;
     }
     return n;
@@ -350,6 +359,10 @@ window.LBFire = (function () {
       if (!f) { burning.splice(i, 1); continue; }
       f.t += dts;
 
+      // v4.3: a burning body that reaches the flying plane sets it on fire
+      // (deps hook → game.js → LBPlane.igniteIfNear; module-clean boundary)
+      if (D.planeIgniteIfNear) D.planeIgniteIfNear(o.position.x, o.position.y, PLANE_CONTACT_R);
+
       // the Thames and the rain both put fire out
       if (o.plugin.wet) { extinguishBody(o, true); continue; }
       var rk = rainKillRate();
@@ -377,6 +390,8 @@ window.LBFire = (function () {
         if (D.step() % 3 === 0) {
           P.flame(vb.position.x + rand2(-12, 12), vb.position.y - 4, rand2(-0.5, 0.5), -rand2(1.6, 3));
         }
+        // v4.3: a burning vehicle flung through the air can catch the plane too
+        if (D.planeIgniteIfNear) D.planeIgniteIfNear(vb.position.x, vb.position.y, PLANE_CONTACT_R);
       }
     }
 
@@ -683,6 +698,7 @@ window.LBFire = (function () {
       queued: queue.length,
       comets: D.LB.fires.length,
       vehiclesOnFire: vehicleFireCount(),
+      planesOnFire: D.planeOnFire ? D.planeOnFire() : 0,   // v4.3: the plane-fire hook
       stats: {
         ignited: stats.ignited,
         brandLandings: stats.brandLandings,

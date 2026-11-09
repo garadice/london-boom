@@ -87,6 +87,40 @@ window.LBPlane = (function () {
     return true;
   }
 
+  /* ---------------- v4.3: fire ignition — burning debris can bring the plane down ----------------
+     fire.js detects a burning body reaching the fuselage and calls the deps
+     hook (game.js forwards igniteIfNear). The plane keeps flying while it
+     burns for ~1.5–2 s with a small flame trail, then goes down through the
+     EXISTING crash path (hit(): tumble, planeCrashes counter, staged impact
+     boom + planeImpactDamage). Kid-safe: no mid-air explosion. */
+  var BURN_MIN = 1.5, BURN_MAX = 2.0;
+
+  function ignite() {
+    if (!plane || plane.state !== 'flying') return false;
+    var b = plane.body, lb = b.plugin.lb;
+    if (lb.onFire) return false;
+    lb.onFire = { t: 0, dur: rand(BURN_MIN, BURN_MAX) };
+    D.LB.audio.hiss();
+    D.P.sparks(b.position.x, b.position.y, 8, D.SPR.glow.orange, 5);
+    for (var k = 0; k < 3; k++) {
+      D.P.flame(b.position.x + rand(-10, 10), b.position.y + rand(-5, 5), rand(-0.5, 0.5), -rand(1, 2));
+    }
+    return true;
+  }
+
+  /* true when a point is within r px of the flying plane's fuselage */
+  function igniteIfNear(x, y, r) {
+    if (!plane || plane.state !== 'flying') return false;
+    if (plane.body.plugin.lb.onFire) return false;
+    var dx = plane.body.position.x - x, dy = plane.body.position.y - y;
+    if (dx * dx + dy * dy > r * r) return false;
+    return ignite();
+  }
+
+  function burning() {
+    return !!(plane && plane.state === 'flying' && plane.body.plugin.lb.onFire);
+  }
+
   /* the plane body hit something (or reached the ground/water) */
   function impact() {
     if (!plane || plane.state !== 'crashing') return;
@@ -259,6 +293,14 @@ window.LBPlane = (function () {
     ctx.fillStyle = '#39405a';
     ctx.beginPath(); ctx.arc(22, 0, 1.8, 0, Math.PI * 2); ctx.fill();
     ctx.restore();
+    // v4.3: burning fuselage — flickering warm glow so the flames read by day
+    if (lb.onFire) {
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.globalAlpha = 0.42 + 0.2 * Math.sin(time * 21);
+      ctx.drawImage(D.SPR.glow.orange, b.position.x - 32, b.position.y - 26, 64, 52);
+      ctx.globalAlpha = 1;
+      ctx.globalCompositeOperation = 'source-over';
+    }
     // soft glow halo at night so the little plane pops against the dark
     if (night > 0.2) {
       ctx.globalAlpha = 0.24 * night;
@@ -292,7 +334,9 @@ window.LBPlane = (function () {
       y: plane ? Math.round(plane.body.position.y) : null,
       dir: plane ? plane.body.plugin.lb.dir : null,
       speed: plane ? Math.round(plane.body.plugin.lb.speed * 100) / 100 : null,
-      angle: plane ? Math.round(plane.body.angle * 1000) / 1000 : null
+      angle: plane ? Math.round(plane.body.angle * 1000) / 1000 : null,
+      onFire: burning(),                                                  // v4.3
+      burnT: (plane && plane.body.plugin.lb.onFire) ? Math.round(plane.body.plugin.lb.onFire.t * 100) / 100 : 0  // v4.3
     };
   }
 
@@ -314,6 +358,21 @@ window.LBPlane = (function () {
       plane.t += dts;
 
       if (plane.state === 'flying') {
+        // v4.3: burning — small flame trail while it keeps flying, then the
+        // EXISTING crash path takes over (hit() = tumble + planeCrashes++)
+        if (lb.onFire) {
+          lb.onFire.t += dts;
+          if ((D.step() % 2) === 0) {
+            D.P.flame(b.position.x + rand(-12, 12), b.position.y + rand(-4, 6), -lb.dir * rand(0.2, 0.9), rand(-1.8, -0.6));
+            if (Math.random() < 0.5) {
+              D.P.spawn('smoke', b.position.x - lb.dir * 10, b.position.y, {
+                vx: -lb.dir * 0.4, vy: rand(-1, -0.3), life: rand(0.7, 1.4),
+                size: rand(6, 11), grow: 8, a: 0.3
+              });
+            }
+          }
+          if (lb.onFire.t >= lb.onFire.dur) { hit(b); return; }
+        }
         // offscreen: gone (keeps the sky tidy + the spawn cadence honest)
         if (b.position.x < -320 || b.position.x > D.W + 320) { despawn(); return; }
         // kinematic cruise: pin pose + velocity every step (like road traffic).
@@ -351,6 +410,9 @@ window.LBPlane = (function () {
     impact: impact,
     spawn: spawn,
     draw: draw,
+    ignite: ignite,              // v4.3: fire ignition entry (game.js hook)
+    igniteIfNear: igniteIfNear,  // v4.3: radius test + ignite (fire.js via deps)
+    burning: burning,            // v4.3: planesOnFire counter source
     reset: function () {
       crashes.length = 0;
       if (plane) despawn();
