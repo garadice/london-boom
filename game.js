@@ -2719,7 +2719,7 @@ function spawnStone(tx) {
   }
   b.plugin.lb.spots = spots;
   M.Composite.add(world, b);
-  const st = { body: b, dir: dir, tapX: tapX, sx: sx, sy: sy, state: 'fall', t: 0, stuck: 0, wear: 0, kills: 0, tilt: 0, on: true, audio: null };
+  const st = { body: b, dir: dir, tapX: tapX, sx: sx, sy: sy, state: 'fall', t: 0, stuck: 0, wear: 0, kills: 0, tilt: 0, on: true, audio: null, fallY0: sy, fallDemand: 0 };
   LB.stones.push(st);
   M.Sleeping.set(b, false);
   M.Body.setVelocity(b, { x: dir * STONE_FALL_VX, y: STONE_FALL_VY0 });
@@ -2731,6 +2731,7 @@ function spawnStone(tx) {
 }
 /* the sky entrance lands: impact drama + the radial shockwave, then the roll begins */
 function stoneSlam(st) {
+  if (st.state !== 'fall' || !st.on) return;   // single-fire: line trigger, ride guard and t-timeout all funnel here
   const b = st.body;
   st.state = 'roll';
   st.t = 0;
@@ -2858,6 +2859,26 @@ function stepStones(dts) {
             size: rand(2.5, 5.5), grav: 0.12, drag: 0.99, vr: rand(-0.3, 0.3), col: '#8d8797'
           });
         }
+      }
+      // surface-ride guard: when the fall reaches ground level the SAME
+      // solver step can eject the boulder onto a support (vehicle cab,
+      // Eye slab) whose top sits ABOVE the slam line — post-solve y then
+      // never reaches GROUND_Y - STONE_R - 4, and the pinned drive grinds
+      // the boulder along the surface instead of slamming at the tap.
+      // Two conditions must BOTH hold to slam early: the descent actually
+      // stalled (a short window whose actual drop lands under ~1/3 of what
+      // the pinned vy demanded — feather rim segments die on contact, but
+      // their pinned chains still bleed descent mid-air, so a stall alone
+      // is NOT enough), AND the boulder's bottom is already ground-adjacent
+      // (GROUND_Y - 40 covers the tallest lane vehicle roof) — i.e. it is
+      // resting on the ground plane at the tap, not plowing through a
+      // structure on the way down. Then slam right there, before it skids.
+      st.fallDemand += vy;
+      if (st.fallDemand >= 26) {
+        if (st.fallY0 - b.position.y < st.fallDemand * 0.35 &&
+            b.position.y + STONE_R >= GROUND_Y - 40) { stoneSlam(st); continue; }
+        st.fallY0 = b.position.y;
+        st.fallDemand = 0;
       }
       if (b.position.y + STONE_R >= GROUND_Y - 4 || st.t > 3.2) stoneSlam(st);
       continue;

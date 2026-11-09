@@ -217,6 +217,24 @@ tools/fire_test.js    Node harness: full headless WILDFIRE suite (39 checks)
     tap x (verified ±3 px). Anything under the sky line gets intercepted
     for real: the boulder grinds through Eye arcs / rooftops on its way
     down (emergent, physics — not an aim miss).
+  - **Slam trigger surface-ride guard (fix)**: the fall branch fired the
+    slam on the POST-solve y (`y + R >= GROUND_Y − 4`), but the SAME engine
+    step's collision can eject the boulder onto a ground-level support
+    (vehicle cab, Eye slab) whose top sits above that line — the trigger
+    window was skipped and the pinned drive ground the boulder along the
+    surface, slamming up to ~700 px past the tap (intermittent, ~20–40% of
+    right taps). The guard: over a short window in `stepStones`' fall
+    branch, if the actual descent delivers under ~1/3 of what the pinned vy
+    demanded AND the boulder's bottom is within 40 px of the ground plane
+    (tallest lane vehicle roof is 29 px), slam right there. Mid-air plows
+    are safe: Eye rim segments die on contact but their pinned chains bleed
+    descent, so the stall test alone is NOT enough — the ground-adjacency
+    gate keeps through-the-wheel falls punching through to the tap (tap
+    1100 keeps its pre-existing deterministic rim-arc slide, slam ~840-880).
+    `stoneSlam` is single-fire guarded. Re-gate: `tools/verify_v43.js`
+    section B asserts the slam x within ±145 px of the tap on clear
+    corridors (8 runs per side, 2 x positions per side) + ground-level slam
+    y; tap 1100 asserts the arc-slide band (±320 px) per its baseline.
   - **Sky entrance**: rising whistle + soft rush (sine 340→1350 Hz + band
     noise, kid-safe), dust/pebble trail while falling (soft-capped at
     P.active ≥ 2600), then the SLAM: shake +34, flash, `boomDeep(1.35)` +
