@@ -1,5 +1,5 @@
 /* Headless quake harness (v4.1, t_26579f08).
-   Boots the REAL game (matter + sky + weather + plane + quake + game.js)
+   Boots the REAL game (matter + sky + weather + plane + quake + fire + game.js)
    in Node with DOM stubs, then drives earthquakes via __TEST__ hooks:
      - phase sequence + fissure growth + counters
      - physical collapse attribution (tower/Eye/annex integrity deltas)
@@ -79,11 +79,13 @@ loadModule('sky.js');
 loadModule('weather.js');
 loadModule('plane.js');
 loadModule('quake.js');
+loadModule('fire.js');     // v4.2: game.js calls LBFire.* — must be loaded before game.js
 // game.js references the modules as bare identifiers — mirror them to global
 global.LBSky = windowObj.LBSky;
 global.LBWeather = windowObj.LBWeather;
 global.LBPlane = windowObj.LBPlane;
 global.LBQuake = windowObj.LBQuake;
+global.LBFire = windowObj.LBFire;
 
 const matterSrc = fs.readFileSync(path.join(REPO, 'vendor', 'matter.min.js'), 'utf8');
 const matterMod = { exports: {} };
