@@ -65,6 +65,25 @@ const documentObj = {
   addEventListener: function () {}
 };
 
+// v4 module split (t_c5dc7f90): game.js references LB* modules as bare
+// identifiers — load them in index.html order and mirror to global, same
+// approach fire_test.js uses
+function loadModule(file) {
+  const mod = fs.readFileSync(path.join(REPO, file), 'utf8');
+  const fn = new Function('window', 'document', 'navigator', 'performance', mod);
+  fn(windowObj, documentObj, windowObj.navigator, performance);
+}
+loadModule('sky.js');
+loadModule('weather.js');
+loadModule('plane.js');
+loadModule('quake.js');
+loadModule('fire.js');
+global.LBSky = windowObj.LBSky;
+global.LBWeather = windowObj.LBWeather;
+global.LBPlane = windowObj.LBPlane;
+global.LBQuake = windowObj.LBQuake;
+global.LBFire = windowObj.LBFire;
+
 // load vendored matter into this context
 const matterSrc = fs.readFileSync(path.join(REPO, 'vendor', 'matter.min.js'), 'utf8');
 const matterMod = { exports: {} };
