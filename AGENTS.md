@@ -41,7 +41,40 @@ Repo: https://github.com/garadice/london-boom (public, MIT, © 2026 Martin Mogis
   one.
 - Kid-safe: no realistic gore, no scary audio spikes.
 
-## Current state (v4.2, Nov 2026)
+## Current state (v4.3, Nov 2026)
+- **v4.3 ROLLING DOOM + plane fire** (branch `coder/t_d5e9f10a-rolling-doom`,
+  final commit af2d581 incl. slam-miss fix t_5f3cef44; gates: coder t_d5e9f10a,
+  verifier t_58f7cf3a FAIL on DoD 2 → fix → re-gate APPROVE_WITH_CAVEATS):
+  STONE fully redone — tap anywhere and a
+  colossal (r 140) doom boulder enters from the sky off the NEAREST side,
+  falls at ~27° trailing dust with a rising whistle, SLAMS the tap point
+  (boom + shake + crater + shove-only shockwave that flips traffic and
+  dislodges masonry), then rolls UNSTOPPABLE through the tap point toward
+  the far edge — masonry crushed instantly (string courses/cornices 2 hits,
+  belfry louvres 3), Eye rim parts snap, vehicles launched with spin
+  (explode on landing) — wearing visible crack stages instead of HP, and
+  exits with a mega splash into the Thames / off-screen, no body left
+  behind. Cap still 2 alive; identity unchanged (🪨 / S key / slot 14 /
+  LB.weaponFired.stone). FIRE now ignites the plane: any burning body
+  reaching the fuselage (46 px contact) or a comet bloom within ~70–90 px
+  sets it alight (1.5–2 s flame trail, kid-safe, no mid-air explosion),
+  then the EXISTING crash path fires (planeCrashes++); clean deps hooks
+  `planeIgniteIfNear` / `planeOnFire` keep fire.js out of plane internals.
+  README + docs/DEV.md updated (v4.3 section + hooks); CACHE bump by main
+  at merge (v4.2.0 → v4.3.0). Hooks: `__TEST__.stoneSpawn(x,y)` / `stones()` /
+  `forceFirePlane()` / `fires().planesOnFire` / `plane().onFire,burnT`.
+  Verified: headless DoD probe 44/44 pre-fix + 0 aim flakes in 112 slam
+  samples post-fix (7 sweeps) + 13 live-browser runs (tap 1540 landed
+  4–69 px off-tap 8/8); 739-kill
+  tower plow without stall, wear stages 0.25/0.5/0.75 crossed, splash exit
+  + LB.stones empty, forced/bloom/contact plane fire each → planeCrashes
+  +1, doom-stone-only finale fires, 0 errors; tools/fire_test.js 39/0
+  unchanged; real-browser file:// boot 0 console errors + 0 external
+  requests before AND after heavy use, idle 60 fps, plow ≥30 fps (gate
+  ≥24); idle headless step cost unchanged vs main (0.94 vs 0.97 ms/step).
+  NOTE: one well-placed stone can now fire the finale by itself
+  (single pass: tower 0.04 + Eye 0.33 — the roll mauls the Eye's bottom rim
+  under it); win math untouched — the weapon is just that strong by design.
 - **v4.2 WILDFIRE (fire.js) — FIRE weapon fully redone** (branch `coder/t_c74cfc69-wildfire`, commit 853332e, coder t_c74cfc69): tap anywhere → a fire comet streaks down and blooms into a fire-flower; the living fire then CLIMBS Elizabeth Tower block by block (directional heat: up 1.9×, down 0.45×; consumed blocks gift heat to their ceiling and fall as burning FIREBRANDS that start new fires where they land). Vehicles catch → panic-drive → explode → fireball. Rain/storm halve spread and actively extinguish (steam + hiss + wet timers); tsunami/vortex douse on contact. ≥80 burning = 3 s FIRESTORM beat (ember rain, taller flames, soft swell). Night: burning blocks glow warm (additive pass) + Thames tint. Caps: 110 concurrent burning (priority ignition queue), flame budget 10/step; LBFire ≈ 1.6 µs idle, ~6 % of a burning headless step (rest = collapse physics, quake-destroyAll class). Win math unchanged — fire alone fires the finale (headless-proven, 25–45 s). Old crate/wave path fully removed (0 grep hits). Hooks: `__TEST__.fireIgnite/fires/fireAt/forceFirestorm`; suite `node tools/fire_test.js` (39 checks). fire.js in sw.js ASSETS + index.html (CACHE bump applied by main at merge: v4.1.2 → v4.2.0).
 - **v4.1.2 TNT BEN redesign**: TNT BEN is now ONE Elizabeth-Tower-shaped
   bomb (single 34×152 Matter body, red-white, clock face, stacked T/N/T
